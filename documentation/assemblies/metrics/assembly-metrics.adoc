@@ -3,13 +3,18 @@
 // deploying/deploying.adoc
 
 [id='assembly-metrics-{context}']
-= Introducing metrics to Kafka
+= Introducing metrics
 
 [role="_abstract"]
 You can use Prometheus and Grafana to monitor your Strimzi deployment.
 
 You can monitor your Strimzi deployment by viewing key metrics on dashboards and setting up alerts that trigger under certain conditions.
 Metrics are available for each of the components of Strimzi.
+
+You can also collect metrics specific to `oauth` authentication and `opa` or `keycloak` authorization. 
+You do this by setting the `enableMetrics` property to `true` in the listener configuration of the `Kafka` resource. 
+For example, set `enableMetrics`  to `true` in `spec.kafka.listeners.authentication` and `spec.kafka.authorization`.
+Similarly, you can enable metrics for `oauth` authentication in the `KafkaBridge`, `KafkaConnect`, `KafkaMirrorMaker`, and `KafkaMirrorMaker2` custom resources.  
 
 To provide metrics information, Strimzi uses Prometheus rules and Grafana dashboards.
 
@@ -25,7 +30,7 @@ Depending on your requirements, you can:
 
 With Prometheus and Grafana set up, you can use the example Grafana dashboards provided by Strimzi for monitoring.
 
-Additionally, you can configure your deployment to track messages end-to-end by link:{BookURLUsing}#assembly-distributed-tracing-str[setting up distributed tracing^].
+Additionally, you can configure your deployment to track messages end-to-end by xref:assembly-distributed-tracing-str[setting up distributed tracing].
 
 NOTE: Strimzi provides example installation files for Prometheus and Grafana.
 You can use these files as a starting point when trying out monitoring of Strimzi.
@@ -42,12 +47,12 @@ For more information on the metrics and monitoring tools, refer to the supportin
 * link:https://zookeeper.apache.org/doc/current/zookeeperJMX.html[ZooKeeper JMX] describes JMX metrics exposed by Apache ZooKeeper
 
 //what is Consumer lag?
-include::modules/con_kafka-exporter-lag.adoc[leveloffset=+1]
+include::../../modules/metrics/con_kafka-exporter-lag.adoc[leveloffset=+1]
 //Understanding metrics for Cruise Control
-include::modules/con-metrics-cruise-control.adoc[leveloffset=+1]
+include::../../modules/metrics/con-metrics-cruise-control.adoc[leveloffset=+1]
 //Example metrics files
 include::assembly-metrics-config-files.adoc[leveloffset=+1]
 //How to set up Prometheus
 include::assembly_metrics-prometheus-setup.adoc[leveloffset=+1]
 //How to add Grafana dashboards
-include::modules/proc_metrics-grafana-dashboard.adoc[leveloffset=+1]
+include::../../modules/metrics/proc_metrics-grafana-dashboard.adoc[leveloffset=+1]

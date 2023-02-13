@@ -4,6 +4,7 @@
  */
 package io.strimzi.systemtest.security;
 
+import org.bouncycastle.asn1.ASN1Encodable;
 import org.bouncycastle.asn1.ASN1Object;
 import org.bouncycastle.asn1.DERSequence;
 import org.bouncycastle.asn1.x500.X500Name;
@@ -73,10 +74,14 @@ public class SystemTestCertAndKeyBuilder {
     private X500Name issuer;
     private X500Name subject;
 
+    // Suppresses the deprecation warning about getSubjectDN()
+    @SuppressWarnings("deprecation")
     private SystemTestCertAndKeyBuilder(KeyPair keyPair, SystemTestCertAndKey caCert, List<Extension> extensions) {
         this.keyPair = keyPair;
         this.caCert = caCert;
         if (caCert != null) {
+            // getSubjectDN is deprecated, but BouncyCastle does not seem to work well with getSubjectX500Principal which replaces it
+            // The fix for this issue is tracked in https://github.com/strimzi/strimzi-kafka-operator/issues/7698
             this.issuer = new X500Name(caCert.getCertificate().getSubjectDN().getName());
         }
         this.extensions = new ArrayList<>(extensions);
@@ -147,10 +152,18 @@ public class SystemTestCertAndKeyBuilder {
         return this;
     }
 
-    public SystemTestCertAndKeyBuilder withSanDnsName(String hostName) {
-        GeneralName dnsName = new GeneralName(dNSName, hostName);
-        byte[] subjectAltName = encode(GeneralNames.getInstance(new DERSequence(dnsName)));
+    public SystemTestCertAndKeyBuilder withSanDnsName(final String hostName) {
+        final GeneralName dnsName = new GeneralName(dNSName, hostName);
+        final byte[] subjectAltName = encode(GeneralNames.getInstance(new DERSequence(dnsName)));
         extensions.add(new Extension(subjectAlternativeName, false, subjectAltName));
+        return this;
+    }
+
+    public SystemTestCertAndKeyBuilder withSanDnsNames(final ASN1Encodable[] sanDnsNames) {
+        final DERSequence subjectAlternativeNames = new DERSequence(sanDnsNames);
+        final byte[] subjectAltName = encode(GeneralNames.getInstance(subjectAlternativeNames));
+        extensions.add(new Extension(subjectAlternativeName, false, subjectAltName));
+
         return this;
     }
 

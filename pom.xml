@@ -5,7 +5,7 @@
     <groupId>io.strimzi</groupId>
     <artifactId>strimzi</artifactId>
     <packaging>pom</packaging>
-    <version>0.31.0-SNAPSHOT</version>
+    <version>0.34.0-SNAPSHOT</version>
 
     <licenses>
         <license>
@@ -71,72 +71,93 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>11</maven.compiler.source>
-        <maven.compiler.target>11</maven.compiler.target>
-        <failsafe.forkCount>1</failsafe.forkCount>
-        <maven.compiler.version>3.8.1</maven.compiler.version>
-        <maven.surefire.version>3.0.0-M5</maven.surefire.version>
-        <maven.failsafe.version>3.0.0-M5</maven.failsafe.version>
-        <maven.assembly.version>3.3.0</maven.assembly.version>
-        <maven.shade.version>3.1.0</maven.shade.version>
-        <maven.javadoc.version>3.1.0</maven.javadoc.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+
+        <!-- Configures if we should fail on warnings when generating Javadocs -->
+        <javadoc.fail.on.warnings>true</javadoc.fail.on.warnings>
+
+        <!-- Maven plugin versions -->
+        <maven.compiler.version>3.10.1</maven.compiler.version>
+        <maven.surefire.version>3.0.0-M7</maven.surefire.version>
+        <maven.failsafe.version>3.0.0-M7</maven.failsafe.version>
+        <maven.assembly.version>3.4.2</maven.assembly.version>
+        <maven.shade.version>3.4.1</maven.shade.version>
+        <maven.javadoc.version>3.4.1</maven.javadoc.version>
         <maven.source.version>3.0.1</maven.source.version>
-        <maven.dependency.version>3.1.1</maven.dependency.version>
+        <maven.dependency.version>3.3.0</maven.dependency.version>
         <maven.gpg.version>1.6</maven.gpg.version>
         <maven.checkstyle.version>3.1.2</maven.checkstyle.version>
+        <maven.enforcer.version>3.0.0-M2</maven.enforcer.version>
+        <maven.jar.version>3.1.0</maven.jar.version>
+        <sonatype.nexus.staging.version>1.6.13</sonatype.nexus.staging.version>
+        <maven.spotbugs.version>4.5.3.0</maven.spotbugs.version>
+        <maven.jacoco.version>0.8.8</maven.jacoco.version>
+        <maven.exec.version>3.1.0</maven.exec.version>
+        <maven.resources.version>3.1.0</maven.resources.version>
+
+        <!-- Build tools -->
         <checkstyle.version>9.2.1</checkstyle.version>
-        <spotbugs.version>4.5.3</spotbugs.version>
-        <sonatype.nexus.staging>1.6.3</sonatype.nexus.staging>
-        <jacoco.version>0.7.9</jacoco.version>
-        <maven-jar-plugin.version>3.1.0</maven-jar-plugin.version>
+        <spotbugs.version>4.7.2</spotbugs.version>
         <sundrio.version>0.91.1</sundrio.version>
-        <fabric8.kubernetes-client.version>6.0.0</fabric8.kubernetes-client.version>
-        <fabric8.openshift-client.version>6.0.0</fabric8.openshift-client.version>
-        <fabric8.kubernetes-model.version>6.0.0</fabric8.kubernetes-model.version>
+        <lombok.version>1.18.24</lombok.version>
+
+        <!-- Runtime dependencies -->
+        <fabric8.kubernetes-client.version>6.3.1</fabric8.kubernetes-client.version>
+        <fabric8.openshift-client.version>6.3.1</fabric8.openshift-client.version>
+        <fabric8.kubernetes-model.version>6.3.1</fabric8.kubernetes-model.version>
         <fabric8.zjsonpatch.version>0.3.0</fabric8.zjsonpatch.version>
-        <vertx.version>4.2.4</vertx.version>
-        <vertx-junit5.version>4.2.4</vertx-junit5.version>
-        <log4j.version>2.17.2</log4j.version>
-        <hamcrest.version>2.2</hamcrest.version>
-        <valid4j.version>1.1</valid4j.version>
-        <fasterxml.jackson-core.version>2.12.6</fasterxml.jackson-core.version>
-        <fasterxml.jackson-databind.version>2.12.6.1</fasterxml.jackson-databind.version>
-        <fasterxml.jackson-dataformat.version>2.12.6</fasterxml.jackson-dataformat.version>
-        <fasterxml.jackson-annotations.version>2.12.6</fasterxml.jackson-annotations.version>
-        <kafka.version>3.2.1</kafka.version>
-        <!-- keep in-sync with dataformat-yaml -->
-        <json-path.version>4.1.1</json-path.version>
-        <zkclient.version>0.11</zkclient.version>
-        <scala-library.version>2.13.6</scala-library.version>
+        <fasterxml.jackson-core.version>2.14.1</fasterxml.jackson-core.version>
+        <fasterxml.jackson-databind.version>2.14.1</fasterxml.jackson-databind.version>
+        <fasterxml.jackson-dataformat.version>2.14.1</fasterxml.jackson-dataformat.version>
+        <fasterxml.jackson-annotations.version>2.14.1</fasterxml.jackson-annotations.version>
+        <!-- This is used to override CVE-2022-25857 and CVE-2022-41854 => should be removed once jackson-dataformat-yaml uses it out of the box -->
+        <!-- https://github.com/strimzi/strimzi-kafka-operator/issues/7261 covers the removal of this override -->
+        <snakeyaml.version>1.33</snakeyaml.version>
+        <vertx.version>4.3.7</vertx.version>
+        <vertx-junit5.version>4.3.7</vertx-junit5.version>
+        <kafka.version>3.4.0</kafka.version>
+        <yammer-metrics.version>2.2.0</yammer-metrics.version>
+        <scala-library.version>2.13.9</scala-library.version>
         <zookeeper.version>3.6.3</zookeeper.version>
-        <mockito.version>4.4.0</mockito.version>
-        <jayway-jsonpath.version>2.6.0</jayway-jsonpath.version>
+        <zkclient.version>0.11</zkclient.version>
         <slf4j.version>1.7.36</slf4j.version>
+        <log4j.version>2.17.2</log4j.version>
         <quartz.version>2.3.2</quartz.version>
         <jaeger.version>1.8.1</jaeger.version>
         <opentracing.version>0.33.0</opentracing.version>
         <opentracing-kafka.version>0.1.13</opentracing-kafka.version>
-        <strimzi-oauth.version>0.10.0</strimzi-oauth.version>
-        <strimzi-test-container.version>0.102.0</strimzi-test-container.version>
-        <commons-codec.version>1.13</commons-codec.version>
+        <opentelemetry.alpha-version>1.18.0-alpha</opentelemetry.alpha-version>
+        <jetty.version>9.4.48.v20220622</jetty.version>
+        <javax-servlet.version>3.1.0</javax-servlet.version>
+        <strimzi-oauth.version>0.11.0</strimzi-oauth.version>
+        <netty.version>4.1.86.Final</netty.version>
+        <micrometer.version>1.9.5</micrometer.version>
+        <jayway-jsonpath.version>2.6.0</jayway-jsonpath.version>
         <registry.version>1.3.2.Final</registry.version>
-        <javax.json-api.version>1.1.4</javax.json-api.version>
-        <javax.json.version>1.1.4</javax.json.version>
-        <rest-assured.version>4.4.0</rest-assured.version>
-        <rest-assured-json-path.version>4.4.0</rest-assured-json-path.version>
-        <jupiter.version>5.8.2</jupiter.version>
+        <commons-codec.version>1.13</commons-codec.version>
+
+        <!-- Test only dependencies -->
+        <hamcrest.version>2.2</hamcrest.version>
+        <mockito.version>4.4.0</mockito.version>
         <junit.platform.version>1.8.2</junit.platform.version>
         <junit-platform-surefire-provider.version>1.3.2</junit-platform-surefire-provider.version>
         <opentest4j.version>1.2.0</opentest4j.version>
-        <exec-maven-plugin.version>1.6.0</exec-maven-plugin.version>
-        <netty.version>4.1.77.Final</netty.version>
-        <micrometer.version>1.3.1</micrometer.version>
-        <bouncycastle.version>1.69</bouncycastle.version>
+        <jupiter.version>5.8.2</jupiter.version>
+        <strimzi-test-container.version>0.102.0</strimzi-test-container.version>
         <mockserver.version>5.13.2</mockserver.version>
-        <!-- property to skip surefire tests during failsafe execution -->
-        <!--suppress UnresolvedMavenProperty -->
-        <skip.surefire.tests>${skipTests}</skip.surefire.tests>
         <mockwebserver.version>3.14.7</mockwebserver.version>
+        <valid4j.version>1.1</valid4j.version>
+        <javax.json.version>1.1.4</javax.json.version>
+        <rest-assured.version>4.4.0</rest-assured.version>
+        <rest-assured-json-path.version>4.4.0</rest-assured-json-path.version>
+        <bouncycastle.version>1.69</bouncycastle.version>
+
+        <!-- properties to skip surefire tests during failsafe execution -->
+        <skipTests>false</skipTests>
+        <skip.surefire.tests>${skipTests}</skip.surefire.tests>
+        <!-- failsafe fork-count configuration -->
+        <failsafe.forkCount>1</failsafe.forkCount>
     </properties>
 
     <distributionManagement>
@@ -172,11 +193,29 @@
 
     <dependencyManagement>
         <dependencies>
+            <!-- Runtime and compile time dependencies-->
             <dependency>
                 <groupId>io.strimzi</groupId>
                 <artifactId>crd-annotations</artifactId>
                 <version>${project.version}</version>
                 <scope>compile</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-annotations</artifactId>
+                <version>${spotbugs.version}</version>
+                <scope>provided</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.sundr</groupId>
+                <artifactId>builder-annotations</artifactId>
+                <version>${sundrio.version}</version>
+                <exclusions>
+                    <exclusion>
+                        <groupId>com.sun</groupId>
+                        <artifactId>tools</artifactId>
+                    </exclusion>
+                </exclusions>
             </dependency>
             <dependency>
                 <groupId>io.strimzi</groupId>
@@ -191,18 +230,6 @@
             </dependency>
             <dependency>
                 <groupId>io.strimzi</groupId>
-                <artifactId>test</artifactId>
-                <version>${project.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>mockkube</artifactId>
-                <version>${project.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
                 <artifactId>api</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -213,36 +240,50 @@
             </dependency>
             <dependency>
                 <groupId>io.strimzi</groupId>
-                <artifactId>api</artifactId>
+                <artifactId>certificate-manager</artifactId>
                 <version>${project.version}</version>
-                <classifier>tests</classifier>
-                <type>test-jar</type>
-                <scope>test</scope>
             </dependency>
             <dependency>
                 <groupId>io.strimzi</groupId>
-                <artifactId>operator-common</artifactId>
-                <version>${project.version}</version>
-                <classifier>tests</classifier>
-                <type>test-jar</type>
-                <scope>test</scope>
+                <artifactId>kafka-oauth-server</artifactId>
+                <version>${strimzi-oauth.version}</version>
             </dependency>
             <dependency>
-                <groupId>io.sundr</groupId>
-                <artifactId>builder-annotations</artifactId>
-                <version>${sundrio.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>com.sun</groupId>
-                        <artifactId>tools</artifactId>
-                    </exclusion>
-                </exclusions>
+                <groupId>io.strimzi</groupId>
+                <artifactId>kafka-oauth-server-plain</artifactId>
+                <version>${strimzi-oauth.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>kafka-oauth-client</artifactId>
+                <version>${strimzi-oauth.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>kafka-oauth-common</artifactId>
+                <version>${strimzi-oauth.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>kafka-oauth-keycloak-authorizer</artifactId>
+                <version>${strimzi-oauth.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.fabric8</groupId>
                 <artifactId>kubernetes-client</artifactId>
                 <version>${fabric8.kubernetes-client.version}</version>
                 <scope>runtime</scope>
+                <exclusions>
+                    <exclusion>
+                        <groupId>io.fabric8</groupId>
+                        <artifactId>kubernetes-httpclient-okhttp</artifactId>
+                    </exclusion>
+                </exclusions>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-httpclient-jdk</artifactId>
+                <version>${fabric8.kubernetes-client.version}</version>
             </dependency>
             <dependency>
                 <groupId>io.fabric8</groupId>
@@ -311,6 +352,11 @@
             </dependency>
             <dependency>
                 <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-model-coordination</artifactId>
+                <version>${fabric8.kubernetes-model.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
                 <artifactId>openshift-model</artifactId>
                 <version>${fabric8.kubernetes-model.version}</version>
             </dependency>
@@ -327,33 +373,13 @@
             </dependency>
             <dependency>
                 <groupId>io.fabric8</groupId>
-                <artifactId>kubernetes-server-mock</artifactId>
-                <version>${fabric8.kubernetes-client.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>com.squareup.okhttp3</groupId>
-                <artifactId>mockwebserver</artifactId>
-                <version>${mockwebserver.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <!-- Pin version of transitive junit dependency of the above dependency to avoid CVE-2020-15250 -->
-                <groupId>junit</groupId>
-                <artifactId>junit</artifactId>
-                <version>4.13.2</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.fabric8</groupId>
-                <artifactId>openshift-server-mock</artifactId>
-                <version>${fabric8.kubernetes-client.version}</version>
-                <scope>test</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.fabric8</groupId>
                 <artifactId>zjsonpatch</artifactId>
                 <version>${fabric8.zjsonpatch.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>openshift-model-operatorhub</artifactId>
+                <version>${fabric8.openshift-client.version}</version>
             </dependency>
             <dependency>
                 <groupId>org.apache.logging.log4j</groupId>
@@ -371,6 +397,12 @@
                 <version>${log4j.version}</version>
             </dependency>
             <dependency>
+                <!-- Used because of OkHttp client which is using JUL (java.util.logging)-->
+                <groupId>org.apache.logging.log4j</groupId>
+                <artifactId>log4j-jul</artifactId>
+                <version>${log4j.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka-clients</artifactId>
                 <version>${kafka.version}</version>
@@ -378,6 +410,36 @@
             <dependency>
                 <groupId>org.apache.kafka</groupId>
                 <artifactId>kafka_2.13</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-server-common</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>connect-runtime</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>connect-json</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>connect-file</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>connect-api</artifactId>
+                <version>${kafka.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.kafka</groupId>
+                <artifactId>kafka-streams</artifactId>
                 <version>${kafka.version}</version>
             </dependency>
             <dependency>
@@ -447,6 +509,13 @@
                 <artifactId>jackson-dataformat-yaml</artifactId>
                 <version>${fasterxml.jackson-dataformat.version}</version>
             </dependency>
+            <!-- This is used to override CVE-2022-25857 => should be removed once jackson-dataformat-yaml uses it out of the box -->
+            <!-- https://github.com/strimzi/strimzi-kafka-operator/issues/7261 covers the removal of this override -->
+            <dependency>
+                <groupId>org.yaml</groupId>
+                <artifactId>snakeyaml</artifactId>
+                <version>${snakeyaml.version}</version>
+            </dependency>
             <dependency>
                 <!-- transitive dep; override here to avoid buggy version -->
                 <groupId>com.fasterxml.jackson.dataformat</groupId>
@@ -481,6 +550,21 @@
                 <groupId>io.vertx</groupId>
                 <artifactId>vertx-core</artifactId>
                 <version>${vertx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.vertx</groupId>
+                <artifactId>vertx-micrometer-metrics</artifactId>
+                <version>${vertx.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-core</artifactId>
+                <version>${micrometer.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.micrometer</groupId>
+                <artifactId>micrometer-registry-prometheus</artifactId>
+                <version>${micrometer.version}</version>
             </dependency>
             <dependency>
                 <!-- transitive dep; override here to avoid buggy version -->
@@ -573,21 +657,6 @@
                 <classifier>linux-x86_64</classifier>
             </dependency>
             <dependency>
-                <groupId>io.vertx</groupId>
-                <artifactId>vertx-web-common</artifactId>
-                <version>${vertx.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.vertx</groupId>
-                <artifactId>vertx-web-client</artifactId>
-                <version>${vertx.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>certificate-manager</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>org.quartz-scheduler</groupId>
                 <artifactId>quartz</artifactId>
                 <version>${quartz.version}</version>
@@ -614,9 +683,84 @@
                 <version>${registry.version}</version>
             </dependency>
             <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>kafka-streams</artifactId>
-                <version>${kafka.version}</version>
+                <groupId>io.jaegertracing</groupId>
+                <artifactId>jaeger-core</artifactId>
+                <version>${jaeger.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentracing</groupId>
+                <artifactId>opentracing-api</artifactId>
+                <version>${opentracing.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentracing</groupId>
+                <artifactId>opentracing-util</artifactId>
+                <version>${opentracing.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-sdk-extension-autoconfigure</artifactId>
+                <version>${opentelemetry.alpha-version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.jayway.jsonpath</groupId>
+                <artifactId>json-path</artifactId>
+                <version>${jayway-jsonpath.version}</version>
+            </dependency>
+
+            <!-- Test dependencies -->
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>test</artifactId>
+                <version>${project.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>mockkube</artifactId>
+                <version>${project.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>api</artifactId>
+                <version>${project.version}</version>
+                <classifier>tests</classifier>
+                <type>test-jar</type>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.strimzi</groupId>
+                <artifactId>operator-common</artifactId>
+                <version>${project.version}</version>
+                <classifier>tests</classifier>
+                <type>test-jar</type>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>kubernetes-server-mock</artifactId>
+                <version>${fabric8.kubernetes-client.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>com.squareup.okhttp3</groupId>
+                <artifactId>mockwebserver</artifactId>
+                <version>${mockwebserver.version}</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <!-- Pin version of transitive junit dependency of the above dependency to avoid CVE-2020-15250 -->
+                <groupId>junit</groupId>
+                <artifactId>junit</artifactId>
+                <version>4.13.2</version>
+                <scope>test</scope>
+            </dependency>
+            <dependency>
+                <groupId>io.fabric8</groupId>
+                <artifactId>openshift-server-mock</artifactId>
+                <version>${fabric8.kubernetes-client.version}</version>
+                <scope>test</scope>
             </dependency>
             <dependency>
                 <groupId>io.strimzi</groupId>
@@ -663,87 +807,6 @@
                 <scope>test</scope>
             </dependency>
             <dependency>
-                <groupId>com.github.spotbugs</groupId>
-                <artifactId>spotbugs-annotations</artifactId>
-                <version>${spotbugs.version}</version>
-                <scope>provided</scope>
-            </dependency>
-            <dependency>
-                <groupId>io.jaegertracing</groupId>
-                <artifactId>jaeger-core</artifactId>
-                <version>${jaeger.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.opentracing</groupId>
-                <artifactId>opentracing-api</artifactId>
-                <version>${opentracing.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.opentracing</groupId>
-                <artifactId>opentracing-util</artifactId>
-                <version>${opentracing.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>connect-runtime</artifactId>
-                <version>${kafka.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>connect-json</artifactId>
-                <version>${kafka.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>connect-file</artifactId>
-                <version>${kafka.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>org.apache.kafka</groupId>
-                <artifactId>connect-api</artifactId>
-                <version>${kafka.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>kafka-oauth-server</artifactId>
-                <version>${strimzi-oauth.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>kafka-oauth-server-plain</artifactId>
-                <version>${strimzi-oauth.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>kafka-oauth-client</artifactId>
-                <version>${strimzi-oauth.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>kafka-oauth-common</artifactId>
-                <version>${strimzi-oauth.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.strimzi</groupId>
-                <artifactId>kafka-oauth-keycloak-authorizer</artifactId>
-                <version>${strimzi-oauth.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.jayway.jsonpath</groupId>
-                <artifactId>json-path</artifactId>
-                <version>${jayway-jsonpath.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.micrometer</groupId>
-                <artifactId>micrometer-core</artifactId>
-                <version>${micrometer.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>io.micrometer</groupId>
-                <artifactId>micrometer-registry-prometheus</artifactId>
-                <version>${micrometer.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>org.junit.jupiter</groupId>
                 <artifactId>junit-jupiter-engine</artifactId>
                 <version>${jupiter.version}</version>
@@ -774,11 +837,6 @@
                 <scope>test</scope>
             </dependency>
             <dependency>
-                <groupId>io.vertx</groupId>
-                <artifactId>vertx-micrometer-metrics</artifactId>
-                <version>${vertx.version}</version>
-            </dependency>
-            <dependency>
                 <groupId>org.junit.platform</groupId>
                 <artifactId>junit-platform-commons</artifactId>
                 <version>${junit.platform.version}</version>
@@ -787,6 +845,21 @@
                 <groupId>org.junit.platform</groupId>
                 <artifactId>junit-platform-launcher</artifactId>
                 <version>${junit.platform.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit.platform</groupId>
+                <artifactId>junit-platform-engine</artifactId>
+                <version>${junit.platform.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.eclipse.jetty</groupId>
+                <artifactId>jetty-server</artifactId>
+                <version>${jetty.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>javax.servlet</groupId>
+                <artifactId>javax.servlet-api</artifactId>
+                <version>${javax-servlet.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
@@ -818,16 +891,6 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-dependency-plugin</artifactId>
                     <version>${maven.dependency.version}</version>
-                    <dependencies>
-                        <dependency>
-                            <!-- Override dep to support Java 11,
-                                 can remove this once maven.dependency.version >= 3.1.2
-                                 see https://issues.apache.org/jira/browse/MDEP-613 -->
-                            <groupId>org.apache.maven.shared</groupId>
-                            <artifactId>maven-dependency-analyzer</artifactId>
-                            <version>1.11.1</version>
-                        </dependency>
-                    </dependencies>
                     <executions>
                         <execution>
                             <id>copy-dependencies</id>
@@ -922,7 +985,7 @@
             <plugin>
                 <groupId>org.jacoco</groupId>
                 <artifactId>jacoco-maven-plugin</artifactId>
-                <version>${jacoco.version}</version>
+                <version>${maven.jacoco.version}</version>
                 <executions>
                     <execution>
                         <goals>
@@ -1022,7 +1085,7 @@
             <plugin>
                 <groupId>com.github.spotbugs</groupId>
                 <artifactId>spotbugs-maven-plugin</artifactId>
-                <version>4.5.3.0</version><dependencies>
+                <version>${maven.spotbugs.version}</version><dependencies>
                 <!-- overwrite dependency on spotbugs if you want to specify the version of˓→spotbugs -->
                 <dependency>
                     <groupId>com.github.spotbugs</groupId>
@@ -1044,6 +1107,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-dependency-plugin</artifactId>
+                <version>${maven.dependency.version}</version>
                 <executions>
                     <execution>
                         <id>analyze</id>
@@ -1054,12 +1118,16 @@
                             <failOnWarning>true</failOnWarning>
                             <ignoredUnusedDeclaredDependencies>
                                 <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-client</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>io.fabric8:kubernetes-httpclient-jdk</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.fabric8:openshift-client</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-clients</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-streams</ignoredUnusedDeclaredDependency>
+                                <!-- Used in Kafka Agent through reflection -->
+                                <ignoredUnusedDeclaredDependency>org.apache.kafka:kafka-server-common</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.scala-lang:scala-library</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-core</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-slf4j-impl</ignoredUnusedDeclaredDependency>
+                                <ignoredUnusedDeclaredDependency>org.apache.logging.log4j:log4j-jul</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.sundr:builder-annotations</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>io.sundr:sundr-codegen</ignoredUnusedDeclaredDependency>
                                 <ignoredUnusedDeclaredDependency>org.projectlombok:lombok</ignoredUnusedDeclaredDependency>
@@ -1077,6 +1145,12 @@
                             <ignoredUsedUndeclaredDependencies>
                                 <ignoredUsedUndeclaredDependency>org.apache.kafka:kafka-raft:jar</ignoredUsedUndeclaredDependency>
                             </ignoredUsedUndeclaredDependencies>
+                            <ignoredNonTestScopedDependencies>
+                                <ignoredNonTestScopedDependency>com.fasterxml.jackson.core:jackson-core</ignoredNonTestScopedDependency>
+                                <ignoredNonTestScopedDependency>org.apache.zookeeper:zookeeper-jute</ignoredNonTestScopedDependency>
+                                <ignoredNonTestScopedDependency>io.fabric8:kubernetes-model-coordination</ignoredNonTestScopedDependency>
+                                <ignoredNonTestScopedDependency>io.fabric8:kubernetes-model-common</ignoredNonTestScopedDependency>
+                            </ignoredNonTestScopedDependencies>
                         </configuration>
                     </execution>
                 </executions>
@@ -1108,7 +1182,7 @@
                             <sourcepath>${project.build.sourceDirectory}:${project.build.directory}/generated-sources/annotations</sourcepath>
                             <show>public</show>
                             <failOnError>true</failOnError>
-                            <failOnWarnings>true</failOnWarnings>
+                            <failOnWarnings>${javadoc.fail.on.warnings}</failOnWarnings>
                         </configuration>
                     </execution>
                 </executions>
@@ -1116,7 +1190,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>${maven-jar-plugin.version}</version>
+                <version>${maven.jar.version}</version>
                 <configuration>
                     <archive>
                         <manifest>
@@ -1129,7 +1203,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-enforcer-plugin</artifactId>
-                <version>3.0.0-M2</version>
+                <version>${maven.enforcer.version}</version>
                 <executions>
                     <execution>
                         <id>enforce-banned-dependencies</id>
@@ -1210,7 +1284,7 @@
                     <plugin>
                         <groupId>org.sonatype.plugins</groupId>
                         <artifactId>nexus-staging-maven-plugin</artifactId>
-                        <version>${sonatype.nexus.staging}</version>
+                        <version>${sonatype.nexus.staging.version}</version>
                         <extensions>true</extensions>
                         <configuration>
                             <serverId>ossrh</serverId>
@@ -1220,30 +1294,6 @@
                     </plugin>
                 </plugins>
             </build>
-        </profile>
-
-        <profile>
-            <id>java-version</id>
-            <activation>
-                <property>
-                    <name>env.JAVA_VERSION_BUILD</name>
-                </property>
-            </activation>
-            <properties>
-                <maven.compiler.source>${env.JAVA_VERSION_BUILD}</maven.compiler.source>
-                <maven.compiler.target>${env.JAVA_VERSION_BUILD}</maven.compiler.target>
-            </properties>
-        </profile>
-        <profile>
-            <id>jdk-11-config</id>
-            <activation>
-                <jdk>11</jdk>
-            </activation>
-            <properties>
-                <javadocExecutable>${java.home}/bin/javadoc</javadocExecutable>
-                <maven.compiler.source>11</maven.compiler.source>
-                <maven.compiler.target>11</maven.compiler.target>
-            </properties>
         </profile>
     </profiles>
 </project>

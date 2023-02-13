@@ -21,7 +21,6 @@ import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.status.KafkaStatus;
 import io.strimzi.api.kafka.model.status.ListenerStatusBuilder;
 import io.strimzi.certs.OpenSslCertManager;
-import io.strimzi.platform.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperator;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
@@ -41,8 +40,10 @@ import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.NodeOperator;
 import io.strimzi.operator.common.operator.resource.PodOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
+import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
+import io.vertx.core.WorkerExecutor;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
@@ -51,10 +52,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.time.Clock;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
-import java.util.function.Supplier;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
@@ -123,14 +123,17 @@ public class KafkaReconcilerStatusTest {
                 .build();
 
     private static Vertx vertx;
+    private static WorkerExecutor sharedWorkerExecutor;
 
     @BeforeAll
     public static void beforeAll()  {
         vertx = Vertx.vertx();
+        sharedWorkerExecutor = vertx.createSharedWorkerExecutor("kubernetes-ops-pool");
     }
 
     @AfterAll
     public static void afterAll()    {
+        sharedWorkerExecutor.close();
         vertx.close();
     }
 
@@ -162,7 +165,7 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check ClusterID
@@ -197,7 +200,7 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check model warning conditions
@@ -284,21 +287,20 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check listener status
             assertThat(status.getListeners().size(), is(1));
             assertThat(status.getListeners().get(0).getName(), is("external"));
             assertThat(status.getListeners().get(0).getType(), is("external"));
-            assertThat(status.getListeners().get(0).getBootstrapServers(), is("5.124.16.8:31234,55.36.78.115:31234,50.35.18.119:31234"));
+            assertThat(status.getListeners().get(0).getBootstrapServers(), is("5.124.16.8:31234,50.35.18.119:31234,55.36.78.115:31234"));
             assertThat(status.getListeners().get(0).getAddresses().size(), is(3));
-            assertThat(status.getListeners().get(0).getAddresses().get(0).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(0).getHost(), is("5.124.16.8"));
-            assertThat(status.getListeners().get(0).getAddresses().get(1).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(1).getHost(), is("55.36.78.115"));
-            assertThat(status.getListeners().get(0).getAddresses().get(2).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(2).getHost(), is("50.35.18.119"));
+
+            // Assert the listener addresses independently on their order
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "5.124.16.8".equals(a.getHost())), is(true));
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "55.36.78.115".equals(a.getHost())), is(true));
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "50.35.18.119".equals(a.getHost())), is(true));
 
             async.flag();
         }));
@@ -390,21 +392,20 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check listener status
             assertThat(status.getListeners().size(), is(1));
             assertThat(status.getListeners().get(0).getName(), is("external"));
             assertThat(status.getListeners().get(0).getType(), is("external"));
-            assertThat(status.getListeners().get(0).getBootstrapServers(), is("my-address-0:31234,5.124.16.8:31234,my-address-1:31234"));
+            assertThat(status.getListeners().get(0).getBootstrapServers(), is("5.124.16.8:31234,my-address-0:31234,my-address-1:31234"));
             assertThat(status.getListeners().get(0).getAddresses().size(), is(3));
-            assertThat(status.getListeners().get(0).getAddresses().get(0).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(0).getHost(), is("my-address-0"));
-            assertThat(status.getListeners().get(0).getAddresses().get(1).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(1).getHost(), is("5.124.16.8"));
-            assertThat(status.getListeners().get(0).getAddresses().get(2).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(2).getHost(), is("my-address-1"));
+
+            // Assert the listener addresses independently on their order
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "my-address-0".equals(a.getHost())), is(true));
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "my-address-1".equals(a.getHost())), is(true));
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "5.124.16.8".equals(a.getHost())), is(true));
 
             async.flag();
         }));
@@ -486,7 +487,7 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check listener status
@@ -495,12 +496,11 @@ public class KafkaReconcilerStatusTest {
             assertThat(status.getListeners().get(0).getType(), is("external"));
             assertThat(status.getListeners().get(0).getBootstrapServers(), is("node-0.my-kube:31234,node-1.my-kube:31234,node-3.my-kube:31234"));
             assertThat(status.getListeners().get(0).getAddresses().size(), is(3));
-            assertThat(status.getListeners().get(0).getAddresses().get(0).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(0).getHost(), is("node-0.my-kube"));
-            assertThat(status.getListeners().get(0).getAddresses().get(1).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(1).getHost(), is("node-1.my-kube"));
-            assertThat(status.getListeners().get(0).getAddresses().get(2).getPort(), is(31234));
-            assertThat(status.getListeners().get(0).getAddresses().get(2).getHost(), is("node-3.my-kube"));
+
+            // Assert the listener addresses independently on their order
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "node-0.my-kube".equals(a.getHost())), is(true));
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "node-1.my-kube".equals(a.getHost())), is(true));
+            assertThat(status.getListeners().get(0).getAddresses().stream().anyMatch(a -> a.getPort() == 31234 && "node-3.my-kube".equals(a.getHost())), is(true));
 
             async.flag();
         }));
@@ -579,7 +579,7 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check listener status
@@ -668,7 +668,7 @@ public class KafkaReconcilerStatusTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(res -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(res -> context.verify(() -> {
             assertThat(res.succeeded(), is(true));
 
             // Check listener status
@@ -748,7 +748,7 @@ public class KafkaReconcilerStatusTest {
         }
 
         @Override
-        public Future<Void> reconcile(KafkaStatus kafkaStatus, Supplier<Date> dateSupplier)    {
+        public Future<Void> reconcile(KafkaStatus kafkaStatus, Clock clock)    {
             return modelWarnings(kafkaStatus)
                     .compose(i -> listeners())
                     .compose(i -> clusterId(kafkaStatus))

@@ -21,14 +21,20 @@ include::modules/deploying/con-deploy-cluster-operator-from-operator-hub.adoc[le
 //Deployment using Helm
 include::modules/deploying/proc-deploy-cluster-operator-helm-chart.adoc[leveloffset=+1]
 //Verifying the deployment and providing access to an external client
-include::assemblies/deploying/assembly-deploy-verify.adoc[leveloffset=+1]
+include::assemblies/deploying/assembly-deploy-client-access.adoc[leveloffset=+1]
+//Securing the deployment
+include::assemblies/security/assembly-securing-access.adoc[leveloffset=+1]
 //Introduce metrics and monitoring to your deployment
 include::assemblies/metrics/assembly-metrics.adoc[leveloffset=+1]
+//Introduce tracing to your deployment
+include::assemblies/tracing/assembly-distributed-tracing.adoc[leveloffset=+1]
 //Upgrading the deployment
 include::assemblies/upgrading/assembly-upgrade.adoc[leveloffset=+1]
 //Downgrading the deployment
 include::assemblies/upgrading/assembly-downgrade.adoc[leveloffset=+1]
 //How to monitor restart events
 include::assemblies/deploying/assembly-deploy-restart-events.adoc[leveloffset=+1]
-//Uninstall the product
-include::assemblies/deploying/assembly-uninstalling.adoc[leveloffset=+1]
+//tuning configuration
+include::assemblies/managing/assembly-tuning-config.adoc[leveloffset=+1]
+//admin -- managing an installation
+include::assemblies/managing/assembly-management-tasks.adoc[leveloffset=+1]

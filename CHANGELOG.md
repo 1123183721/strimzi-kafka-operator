@@ -1,10 +1,140 @@
-
 # CHANGELOG
+
+## 0.34.0
+
+* Add support for Kafka 3.4.0 and remove support for Kafka 3.2.x
+* Use JDK HTTP client in the Kubernetes client instead of the OkHttp client
+* Add truststore configuration for HTTPS connections to OPA server
+
+## 0.33.0
+
+* Add support for Kafka 3.3.2
+* Support loadBalancerClass attribute in service with type loadBalancer
+* Support for automatically restarting failed Connect or Mirror Maker 2 connectors
+* Redesign of Strimzi User Operator to improve its scalability
+* Use Java 17 as the runtime for all containers and language level for all modules except `api`, `crd-generator`, `crd-annotations`, and `test`
+* Improved FIPS (Federal Information Processing Standards) support
+* Upgrade Vert.x to 4.3.5
+* Moved from using the Jaeger exporter to OTLP exporter by default
+* Kafka Exporter support for `Recreate` deployment strategy
+* `ImageStream` validation for Kafka Connect builds on OpenShift
+* Support for configuring the metadata for the Role / RoleBinding of Entity Operator
+* Add liveness and readiness probes specifically for nodes running in KRaft combined mode
+* Upgrade HTTP bridge to latest 0.24.0 release
+
+### Known issues
+
+* The TLS passthrough feature of the Ingress-NGINX Controller for Kubernetes is not compatible with some new TLS features supported by Java 17 such as the _session tickets extension_.
+  If you use `type: ingress` listener with enabled mTLS authentication, we recommend you to test if your clients are affected or not.
+  If needed, you can also disable the _session ticket extension_ in the Kafka brokers in your `Kafka` custom resource by setting the `jdk.tls.server.enableSessionTicketExtension` Java system property to `false`:
+  ```yaml
+  apiVersion: kafka.strimzi.io/v1beta2
+  kind: Kafka
+  metadata:
+    # ...
+  spec:
+    # ...
+    kafka:
+      jvmOptions:
+        javaSystemProperties:
+          - name: jdk.tls.server.enableSessionTicketExtension
+            value: "false"
+    # ...
+  ```
+  For more details, see [kubernetes/ingress-nginx#9540](https://github.com/kubernetes/ingress-nginx/issues/9540).
+
+### Changes, deprecations and removals
+
+* The `UseStrimziPodSet` feature gate will move to GA in Strimzi 0.35.
+  Support for StatefulSets will be removed from Strimzi right after the 0.34 release.
+  Please use the Strimzi 0.33 release to test StrimziPodSets in your environment and report any major or blocking issues before the StatefulSet support is removed.
+* The default length of any new SCRAM-SHA-512 passwords will be 32 characters instead of 12 characters used in the previous Strimzi versions.
+  Existing passwords will not be affected by this change until they are regenerated (for example because the user secret is deleted).
+  If you want to keep using the original password length, you can set it using the `STRIMZI_SCRAM_SHA_PASSWORD_LENGTH` environment variable in `.spec.entityOperator.template.userOperatorContainer.env` in the `Kafka` custom resource or in the `Deployment` of the standalone User Operator.
+  ```yaml
+  userOperatorContainer:
+    env:
+      - name: STRIMZI_SCRAM_SHA_PASSWORD_LENGTH
+        value: "12"
+  ```
+* In previous versions, the `ssl.secure.random.implementation` option in Kafka brokers was always set to `SHA1PRNG`.
+  From Strimzi 0.33 on, it is using the default SecureRandom implementation from the Java Runtime.
+  If you want to keep using `SHA1PRNG` as your SecureRandom, you can configure it in `.spec.kafka.config` in your `Kafka` custom resource.
+* Support for JmxTrans in Strimzi is deprecated. 
+  It is currently planned to be removed in Strimzi 0.35.0.
+* Support for `type: jaeger` tracing based on Jaeger clients and OpenTracing API was deprecated in the Strimzi 0.31 release.
+  As the Jaeger clients are retired and the OpenTracing project is archived, we cannot guarantee their support for future versions.
+  In Strimzi 0.32 and 0.33, we added support for OpenTelemetry tracing as a replacement.
+  If possible, we will maintain the support for `type: jaeger` tracing until June 2023 and remove it afterwards.
+  Please migrate to OpenTelemetry as soon as possible.
+* When OpenTelemetry is enabled for tracing, starting from this release, the operator configures the OTLP exporter instead of the Jaeger one by default.
+  The Jaeger exporter is even not included in the Kafka images anymore, so if you want to use it you have to add the binary by yourself.
+  The `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable has to be used instead of the `OTEL_EXPORTER_JAEGER_ENDPOINT` in order to specify the OTLP endpoint to send traces to.
+  If you are using Jaeger as the backend system for tracing, you need to have 1.35 release at least which is the first one exposing an OTLP endpoint.
+
+## 0.32.0
+
+* Add support for Kafka 3.3.1 and remove support for Kafka 3.1.0, 3.1.1, and 3.1.2
+* Update Open Policy Agent (OPA) Authorizer to 1.5.0
+* Update KafkaConnector CR status so the 'NotReady' condition is added if the connector or any tasks are reporting a 'FAILED' state.
+* Add auto-approval mechanism on KafkaRebalance resource when an optimization proposal is ready
+* The `ControlPlaneListener` feature gate moves to GA
+* Add client rack-awareness support to Strimzi Bridge pods
+* Add support for OpenTelemetry for distributed tracing
+  * Kafka Connect, Mirror Maker, Mirror Maker 2 and Strimzi Bridge can be configured to use OpenTelemetry
+  * Using Jaeger exporter by default for backward compatibility
+* Updated JMX Exporter dependency to 0.17.2
+* ZookeeperRoller considers unready pods
+* Support multiple operations per ACLRule
+* Upgrade Vert.x to 4.3.4
+* Add `cluster-ip` listener. We can use it with a tcp port configuration in an ingress controller to expose kafka with an optional tls encryption and a single LoadBalancer.
+* Update Strimzi OAuth library to 0.11.0
+
+### Changes, deprecations and removals
+
+* **From 0.32.0 on, Strimzi supports only Kubernetes version 1.19 and newer.**
+* A connector or task failing triggers a 'NotReady' condition to be added to the KafkaConnector CR status. This is different from previous versions where the CR would report 'Ready' even if the connector or a task had failed.
+* The `ClusterRole` from file `020-ClusterRole-strimzi-cluster-operator-role.yaml` was split into two separate roles:
+  * The original `strimzi-cluster-operator-namespaced` `ClusterRole` in the file `020-ClusterRole-strimzi-cluster-operator-role.yaml` contains the rights related to the resources created based on some Strimzi custom resources.
+  * The new `strimzi-cluster-operator-watched` `ClusterRole` in the file `023-ClusterRole-strimzi-cluster-operator-role.yaml` contains the rights required to watch and manage the Strimzi custom resources.
+  
+  When deploying the Strimzi Cluster Operator as cluster-wide, the `strimzi-cluster-operator-watched` `ClusterRole` needs to be always granted at the cluster level.
+  But the `strimzi-cluster-operator-namespaced` `ClusterRole` might be granted only for the namespaces where any custom resources are created.
+* The `ControlPlaneListener` feature gate moves to GA. 
+  Direct upgrade from Strimzi 0.22 or earlier is not possible anymore.
+  You have to upgrade first to one of the Strimzi versions between 0.22 and 0.32 before upgrading to Strimzi 0.32 or newer.
+  Please follow the docs for more details.  
+* The `spec.authorization.acls[*].operation` field in the `KafkaUser` resource has been deprecated in favour of the field
+  `spec.authorization.acls[*].operations` which allows to set multiple operations per ACLRule.
+
+## 0.31.1
+
+* Kafka 3.1.2 and 3.2.3 (fixes CVE-2022-34917)
+* Make `sasl.server.max.receive.size` broker option user configurable
+* Documentation improvements
+* Configuring number of operator replicas through the Strimzi Helm Chart
+* Update Strimzi Kafka Bridge to 0.22.1
 
 ## 0.31.0
 
 * Add support for Kafka 3.2.1
+* Update Kaniko builder to 1.9.0 and Maven builder to 1.14
+* Update Kafka Exporter to 1.6.0 
 * Pluggable Pod Security Profiles with built-in support for _restricted_ Kubernetes Security Profile
+* Add support for leader election and running multiple operator replicas (1 active leader replicas and one or more stand-by replicas)
+* Update Strimzi Kafka Bridge to 0.22.0
+* Add support for IPv6 addresses being used in Strimzi issued certificates
+* Make it easier to wait for custom resource readiness when using the Strimzi api module
+* Add StrimziPodSet reconciliation metrics
+
+### Deprecations and removals
+
+* Strimzi 0.31.0 (and any possible patch releases) is the last Strimzi version with support for Kubernetes 1.16, 1.17 and 1.18.
+  From Strimzi 0.32.0 on, we will support only Kubernetes 1.19 and newer.
+  The supported Kubernetes versions will be re-evaluated again in Q1/2023.
+* The `type: jaeger` tracing support based on Jaeger clients and OpenTracing API is now deprecated.
+  Because the Jaeger clients are retired and the OpenTracing project is archived, we cannot guarantee their support for future Kafka versions.
+  In the future, we plan to replace it with a new tracing feature based on the OpenTelemetry project.
 
 ## 0.30.0
 

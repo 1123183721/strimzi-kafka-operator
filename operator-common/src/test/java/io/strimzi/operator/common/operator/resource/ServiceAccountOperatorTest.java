@@ -39,7 +39,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<KubernetesClient, ServiceAccount, ServiceAccountList, Resource<ServiceAccount>> {
+public class ServiceAccountOperatorTest extends AbstractNamespacedResourceOperatorTest<KubernetesClient, ServiceAccount, ServiceAccountList, Resource<ServiceAccount>> {
 
 
     @Override
@@ -53,10 +53,10 @@ public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<Kub
     }
 
     @Override
-    protected ServiceAccount resource() {
+    protected ServiceAccount resource(String name) {
         return new ServiceAccountBuilder()
                 .withNewMetadata()
-                    .withName(RESOURCE_NAME)
+                    .withName(name)
                     .withNamespace(NAMESPACE)
                     .withLabels(singletonMap("foo", "bar"))
                 .endMetadata()
@@ -64,10 +64,10 @@ public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<Kub
     }
 
     @Override
-    protected ServiceAccount modifiedResource() {
+    protected ServiceAccount modifiedResource(String name) {
         return new ServiceAccountBuilder()
                 .withNewMetadata()
-                    .withName(RESOURCE_NAME)
+                    .withName(name)
                     .withNamespace(NAMESPACE)
                     .withLabels(singletonMap("foo2", "bar2"))
                 .endMetadata()
@@ -80,7 +80,7 @@ public class ServiceAccountOperatorTest extends AbstractResourceOperatorTest<Kub
     }
 
     @Override
-    protected AbstractResourceOperator<KubernetesClient, ServiceAccount, ServiceAccountList, Resource<ServiceAccount>> createResourceOperations(Vertx vertx, KubernetesClient mockClient) {
+    protected AbstractNamespacedResourceOperator<KubernetesClient, ServiceAccount, ServiceAccountList, Resource<ServiceAccount>> createResourceOperations(Vertx vertx, KubernetesClient mockClient) {
         return new ServiceAccountOperator(vertx, mockClient);
     }
 

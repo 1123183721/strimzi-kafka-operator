@@ -19,7 +19,6 @@ import java.net.URL;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import static java.util.Collections.emptyMap;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -28,24 +27,17 @@ import static org.junit.jupiter.api.Assertions.fail;
 class ResourceTester<R extends HasMetadata, M extends AbstractModel> {
 
     private final KafkaVersion.Lookup lookup;
-    private Class<R> cls;
-    private String prefix;
+    private final Class<R> cls;
+    private final String prefix;
+    private final BiFunction<R, KafkaVersion.Lookup, M> fromK8sResource;
     private M model;
-    private BiFunction<R, KafkaVersion.Lookup, M> fromK8sResource;
+    private R cr;
     private String resourceName;
 
     ResourceTester(Class<R> cls, KafkaVersion.Lookup lookup, BiFunction<R, KafkaVersion.Lookup, M> fromK8sResource, String prefix) {
         this.lookup = lookup;
         this.cls = cls;
         this.fromK8sResource = fromK8sResource;
-        this.prefix = prefix;
-        beforeEach();
-    }
-
-    ResourceTester(Class<R> cls, Function<R, M> fromK8sResource, String prefix) {
-        this.lookup = new KafkaVersion.Lookup(emptyMap(), emptyMap(), emptyMap(), emptyMap());
-        this.cls = cls;
-        this.fromK8sResource = (x, y) -> fromK8sResource.apply(x);
         this.prefix = prefix;
         beforeEach();
     }
@@ -73,11 +65,22 @@ class ResourceTester<R extends HasMetadata, M extends AbstractModel> {
         }
     }
 
-    protected void assertDesiredResource(String suffix, Function<M, ?> fn) throws IOException {
+    protected void assertDesiredModel(String suffix, Function<M, ?> fn) throws IOException {
         assertThat("The resource " + resourceName + " does not exist", model, is(notNullValue()));
         String content = readResource(prefix + suffix);
         if (content != null) {
             String ssStr = toYamlString(fn.apply(model));
+            assertThat(ssStr.trim(), is(content.trim()));
+        } else {
+            fail("The resource " + prefix + suffix + " does not exist");
+        }
+    }
+
+    protected void assertDesiredResource(String suffix, Function<R, ?> fn) throws IOException {
+        assertThat("The resource " + resourceName + " does not exist", model, is(notNullValue()));
+        String content = readResource(prefix + suffix);
+        if (content != null) {
+            String ssStr = toYamlString(fn.apply(cr));
             assertThat(ssStr.trim(), is(content.trim()));
         } else {
             fail("The resource " + prefix + suffix + " does not exist");
@@ -117,9 +120,9 @@ class ResourceTester<R extends HasMetadata, M extends AbstractModel> {
         if (resource == null) {
             model = null;
         } else {
-            R cm = fromYaml(resource, cls);
+            cr = fromYaml(resource, cls);
             // Construct the desired resources from the CM
-            model = fromK8sResource.apply(cm, lookup);
+            model = fromK8sResource.apply(cr, lookup);
         }
     }
 }

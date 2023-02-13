@@ -33,8 +33,6 @@ import io.strimzi.operator.cluster.model.ModelUtils;
 import io.strimzi.operator.cluster.model.StatusDiff;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
-import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
-import io.strimzi.operator.cluster.operator.resource.events.KubernetesRestartEventPublisher;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
@@ -42,15 +40,13 @@ import io.strimzi.operator.common.ReconciliationException;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.StatusUtils;
+import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 
-import java.util.Date;
-import java.util.function.Supplier;
-
-import static io.strimzi.operator.cluster.model.AbstractModel.ANNO_STRIMZI_IO_STORAGE;
+import java.time.Clock;
 
 /**
  * <p>Assembly operator for a "Kafka" assembly, which manages:</p>
@@ -71,7 +67,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
     private final StatefulSetOperator stsOperations;
     private final CrdOperator<KubernetesClient, Kafka, KafkaList> crdOperator;
     private final StrimziPodSetOperator strimziPodSetOperator;
-    private final KubernetesRestartEventPublisher eventsPublisher;
+    protected Clock clock;
 
     /**
      * @param vertx The Vertx instance
@@ -94,7 +90,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         this.stsOperations = supplier.stsOperations;
         this.crdOperator = supplier.kafkaOperator;
         this.strimziPodSetOperator = supplier.strimziPodSetOperator;
-        this.eventsPublisher = supplier.restartEventsPublisher;
+        this.clock = Clock.systemUTC();
     }
 
     @Override
@@ -112,7 +108,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
             if (reconcileResult.succeeded())    {
                 condition = new ConditionBuilder()
-                        .withLastTransitionTime(StatusUtils.iso8601(dateSupplier()))
+                        .withLastTransitionTime(StatusUtils.iso8601(clock.instant()))
                         .withType("Ready")
                         .withStatus("True")
                         .build();
@@ -121,7 +117,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                 createOrUpdatePromise.complete(status);
             } else {
                 condition = new ConditionBuilder()
-                        .withLastTransitionTime(StatusUtils.iso8601(dateSupplier()))
+                        .withLastTransitionTime(StatusUtils.iso8601(clock.instant()))
                         .withType("NotReady")
                         .withStatus("True")
                         .withReason(reconcileResult.cause().getClass().getSimpleName())
@@ -150,15 +146,15 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
 
         reconcileState.initialStatus()
                 // Preparation steps => prepare cluster descriptions, handle CA creation or changes
-                .compose(state -> state.reconcileCas(this::dateSupplier))
+                .compose(state -> state.reconcileCas(clock))
                 .compose(state -> state.versionChange())
 
                 // Run reconciliations of the different components
-                .compose(state -> featureGates.useKRaftEnabled() ? Future.succeededFuture(state) : state.reconcileZooKeeper(this::dateSupplier))
-                .compose(state -> state.reconcileKafka(this::dateSupplier))
-                .compose(state -> state.reconcileEntityOperator(this::dateSupplier))
-                .compose(state -> state.reconcileCruiseControl(this::dateSupplier))
-                .compose(state -> state.reconcileKafkaExporter(this::dateSupplier))
+                .compose(state -> featureGates.useKRaftEnabled() ? Future.succeededFuture(state) : state.reconcileZooKeeper(clock))
+                .compose(state -> state.reconcileKafka(clock))
+                .compose(state -> state.reconcileEntityOperator(clock))
+                .compose(state -> state.reconcileCruiseControl(clock))
+                .compose(state -> state.reconcileKafkaExporter(clock))
                 .compose(state -> state.reconcileJmxTrans())
 
                 // Finish the reconciliation
@@ -269,7 +265,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
                         LOGGER.debugCr(reconciliation, "Setting the initial status for a new resource");
 
                         Condition deployingCondition = new ConditionBuilder()
-                                .withLastTransitionTime(StatusUtils.iso8601(dateSupplier()))
+                                .withLastTransitionTime(StatusUtils.iso8601(clock.instant()))
                                 .withType("NotReady")
                                 .withStatus("True")
                                 .withReason("Creating")
@@ -298,7 +294,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
             Storage storage = null;
 
             if (sts != null)    {
-                String jsonStorage = Annotations.stringAnnotation(sts, ANNO_STRIMZI_IO_STORAGE, null);
+                String jsonStorage = Annotations.stringAnnotation(sts, Annotations.ANNO_STRIMZI_IO_STORAGE, null);
 
                 if (jsonStorage != null)    {
                     storage = ModelUtils.decodeStorageFromJson(jsonStorage);
@@ -351,14 +347,17 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
          * Creates the CaReconciler instance and reconciles the Clients and Cluster CAs. The resulting CAs are stored
          * in the ReconciliationState and used later to reconcile the operands.
          *
+         * @param clock     The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+         *                  That time is used for checking maintenance windows
+         *
          * @return  Future with Reconciliation State
          */
-        Future<ReconciliationState> reconcileCas(Supplier<Date> dateSupplier)    {
+        Future<ReconciliationState> reconcileCas(Clock clock)    {
             return caReconciler()
-                    .reconcile(dateSupplier)
+                    .reconcile(clock)
                     .compose(cas -> {
-                        this.clusterCa = cas.clusterCa;
-                        this.clientsCa = cas.clientsCa;
+                        this.clusterCa = cas.clusterCa();
+                        this.clientsCa = cas.clientsCa();
                         return Future.succeededFuture(this);
                     });
         }
@@ -444,13 +443,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         /**
          * Run the reconciliation pipeline for the ZooKeeper
          *
-         * @param   dateSupplier  Date supplier used to check maintenance windows
+         * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+         *              That time is used for checking maintenance windows
          *
-         * @return  Future with Reconciliation State
+         * @return      Future with Reconciliation State
          */
-        Future<ReconciliationState> reconcileZooKeeper(Supplier<Date> dateSupplier)    {
+        Future<ReconciliationState> reconcileZooKeeper(Clock clock)    {
             return zooKeeperReconciler()
-                    .compose(reconciler -> reconciler.reconcile(kafkaStatus, dateSupplier))
+                    .compose(reconciler -> reconciler.reconcile(kafkaStatus, clock))
                     .map(this);
         }
 
@@ -519,15 +519,16 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         }
 
         /**
-         * Run the reconciliation pipeline for the ZooKeeper
+         * Run the reconciliation pipeline for Kafka
          *
-         * @param   dateSupplier  Date supplier used to check maintenance windows
+         * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+         *              That time is used for checking maintenance windows
          *
-         * @return  Future with Reconciliation State
+         * @return      Future with Reconciliation State
          */
-        Future<ReconciliationState> reconcileKafka(Supplier<Date> dateSupplier)    {
+        Future<ReconciliationState> reconcileKafka(Clock clock)    {
             return kafkaReconciler()
-                    .compose(reconciler -> reconciler.reconcile(kafkaStatus, dateSupplier))
+                    .compose(reconciler -> reconciler.reconcile(kafkaStatus, clock))
                     .map(this);
         }
 
@@ -550,13 +551,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         /**
          * Run the reconciliation pipeline for the Kafka Exporter
          *
-         * @param dateSupplier  Date supplier used to check maintenance windows
+         * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+         *              That time is used for checking maintenance windows
          *
-         * @return              Future with Reconciliation State
+         * @return      Future with Reconciliation State
          */
-        Future<ReconciliationState> reconcileKafkaExporter(Supplier<Date> dateSupplier)    {
+        Future<ReconciliationState> reconcileKafkaExporter(Clock clock)    {
             return kafkaExporterReconciler()
-                    .reconcile(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets, dateSupplier)
+                    .reconcile(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets, clock)
                     .map(this);
         }
 
@@ -605,13 +607,14 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         /**
          * Run the reconciliation pipeline for the Cruise Control
          *
-         * @param dateSupplier  Date supplier used to check maintenance windows
+         * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+         *              That time is used for checking maintenance windows
          *
-         * @return  Future with Reconciliation State
+         * @return      Future with Reconciliation State
          */
-        Future<ReconciliationState> reconcileCruiseControl(Supplier<Date> dateSupplier)    {
+        Future<ReconciliationState> reconcileCruiseControl(Clock clock)    {
             return cruiseControlReconciler()
-                    .reconcile(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets, dateSupplier)
+                    .reconcile(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets, clock)
                     .map(this);
         }
 
@@ -634,19 +637,16 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
         /**
          * Run the reconciliation pipeline for the Entity Operator
          *
-         * @param dateSupplier  Date supplier used to check maintenance windows
+         * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+         *              That time is used for checking maintenance windows
          *
-         * @return  Future with Reconciliation State
+         * @return      Future with Reconciliation State
          */
-        Future<ReconciliationState> reconcileEntityOperator(Supplier<Date> dateSupplier)    {
+        Future<ReconciliationState> reconcileEntityOperator(Clock clock)    {
             return entityOperatorReconciler()
-                    .reconcile(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets, dateSupplier)
+                    .reconcile(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets, clock)
                     .map(this);
         }
-    }
-
-    /* test */ Date dateSupplier() {
-        return new Date();
     }
 
     @Override
@@ -662,7 +662,7 @@ public class KafkaAssemblyOperator extends AbstractAssemblyOperator<KubernetesCl
      */
     @Override
     protected Future<Boolean> delete(Reconciliation reconciliation) {
-        return withIgnoreRbacError(reconciliation, clusterRoleBindingOperations.reconcile(reconciliation, KafkaResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null), null)
+        return ReconcilerUtils.withIgnoreRbacError(reconciliation, clusterRoleBindingOperations.reconcile(reconciliation, KafkaResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null), null)
                 .map(Boolean.FALSE); // Return FALSE since other resources are still deleted by garbage collection
     }
 }

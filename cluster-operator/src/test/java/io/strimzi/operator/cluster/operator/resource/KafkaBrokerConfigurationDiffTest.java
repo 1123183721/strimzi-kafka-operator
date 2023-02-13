@@ -33,13 +33,13 @@ import static org.junit.jupiter.api.Assertions.fail;
 public class KafkaBrokerConfigurationDiffTest {
 
     private static final KafkaVersion.Lookup VERSIONS = KafkaVersionTestUtils.getKafkaVersionLookup();
-    private static final String KAFKA_VERSION = "3.2.1";
+    private static final String KAFKA_VERSION = "3.3.2";
     KafkaVersion kafkaVersion = VERSIONS.supportedVersion(KAFKA_VERSION);
-    private int brokerId = 0;
+    private final int brokerId = 0;
 
     private ConfigEntry instantiateConfigEntry(String name, String val) {
         // use reflection to instantiate ConfigEntry
-        Constructor constructor;
+        Constructor<?> constructor;
         ConfigEntry configEntry = null;
         {
             try {
@@ -86,8 +86,7 @@ public class KafkaBrokerConfigurationDiffTest {
             fail(e);
         }
 
-        Config config = new Config(entryList);
-        return config;
+        return new Config(entryList);
     }
 
     private void assertConfig(KafkaBrokerConfigurationDiff kcd, ConfigEntry ce) {

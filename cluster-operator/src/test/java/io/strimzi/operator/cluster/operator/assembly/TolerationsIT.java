@@ -11,7 +11,7 @@ import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
-import io.strimzi.operator.cluster.model.ModelUtils;
+import io.strimzi.operator.cluster.model.WorkloadUtils;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetDiff;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.k8s.KubeClusterResource;
@@ -35,7 +35,7 @@ import static org.hamcrest.Matchers.is;
 public class TolerationsIT {
 
     protected KubeClusterResource cluster = KubeClusterResource.getInstance();
-    private String namespace = "kafka-it-2";
+    private final String namespace = "kafka-it-2";
 
     @BeforeEach
     public void beforeEach() {
@@ -58,7 +58,7 @@ public class TolerationsIT {
         tolerationList.add(t1);
 
         // CO does this over the generated STS
-        tolerationList = ModelUtils.removeEmptyValuesFromTolerations(tolerationList);
+        tolerationList = WorkloadUtils.removeEmptyValuesFromTolerations(tolerationList);
 
         StatefulSet ss = new StatefulSetBuilder()
                 .withNewMetadata()

@@ -9,7 +9,6 @@ import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 import org.junit.jupiter.params.provider.Arguments;
 
-import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -22,23 +21,22 @@ public class UpgradeDowngradeData {
     private String fromVersion;
     private String fromExamples;
     private String urlFrom;
+    private String fromKafkaVersionsUrl;
     private String oldestKafka;
     private String defaultKafka;
     private String deployKafkaVersion;
     private String startingKafkaVersion;
     private String featureGatesBefore;
     private String featureGatesAfter;
-    private Map<String, String> conversionTool;
     private Map<String, String> imagesAfterOperations;
     private Map<String, Object> client;
     private Map<String, String> environmentInfo;
-    private Map<String, String> procedures;
+    private UpgradeKafkaVersion procedures;
 
     // Downgrade specific variables
     private String toVersion;
     private String toExamples;
     private String urlTo;
-
     public Integer getAdditionalTopics() {
         return additionalTopics;
     }
@@ -53,6 +51,10 @@ public class UpgradeDowngradeData {
 
     public String getUrlFrom() {
         return urlFrom;
+    }
+
+    public String getFromKafkaVersionsUrl() {
+        return fromKafkaVersionsUrl;
     }
 
     public String getOldestKafka() {
@@ -77,18 +79,6 @@ public class UpgradeDowngradeData {
 
     public String getFeatureGatesAfter() {
         return featureGatesAfter;
-    }
-
-    public Map<String, String> getConversionTool() {
-        return conversionTool;
-    }
-
-    public String getToConversionTool() {
-        return conversionTool.get("toConversionTool");
-    }
-
-    public String getUrlToConversionTool() {
-        return conversionTool.get("urlToConversionTool");
     }
 
     public Map<String, String> getImagesAfterOperations() {
@@ -140,20 +130,8 @@ public class UpgradeDowngradeData {
         return environmentInfo.get("reason");
     }
 
-    public Map<String, String> getProcedures() {
+    public UpgradeKafkaVersion getProcedures() {
         return procedures;
-    }
-
-    public String getProcedureKafkaVersion() {
-        return procedures.get("kafkaVersion");
-    }
-
-    public String getProcedureLogMessageVersion() {
-        return procedures.get("logMessageVersion");
-    }
-
-    public String getProcedureInterBrokerProtocolVersion() {
-        return procedures.get("interBrokerProtocolVersion");
     }
 
     public String getToVersion() {
@@ -184,6 +162,10 @@ public class UpgradeDowngradeData {
         this.urlFrom = urlFrom;
     }
 
+    public void setFromKafkaVersionsUrlm(String fromKafkaVersionsUrl) {
+        this.fromKafkaVersionsUrl = fromKafkaVersionsUrl;
+    }
+
     public void setOldestKafka(String oldestKafka) {
         this.oldestKafka = oldestKafka;
     }
@@ -208,11 +190,6 @@ public class UpgradeDowngradeData {
         this.featureGatesAfter = featureGatesAfter;
     }
 
-    public void setConversionTool(Map<String, String> conversionTool) {
-        this.conversionTool = conversionTool;
-    }
-
-
     public void setClient(Map<String, Object> client) {
         this.client = client;
     }
@@ -221,7 +198,7 @@ public class UpgradeDowngradeData {
         this.environmentInfo = environmentInfo;
     }
 
-    public void setProcedures(Map<String, String> procedures) {
+    public void setProcedures(UpgradeKafkaVersion procedures) {
         this.procedures = procedures;
     }
 
@@ -239,7 +216,7 @@ public class UpgradeDowngradeData {
 
     public String getDefaultKafkaVersionPerStrimzi() {
         try {
-            List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.parseKafkaVersionsFromUrl("https://raw.githubusercontent.com/strimzi/strimzi-kafka-operator/" + getFromVersion() + "/kafka-versions.yaml");
+            List<TestKafkaVersion> testKafkaVersions = TestKafkaVersion.parseKafkaVersionsFromUrl(getFromKafkaVersionsUrl());
             return testKafkaVersions.stream().filter(TestKafkaVersion::isDefault).collect(Collectors.toList()).get(0).version();
         } catch (Exception e) {
             LOGGER.error("Cannot parse Kafka versions from URL");
@@ -255,11 +232,7 @@ public class UpgradeDowngradeData {
         TestKafkaVersion testKafkaVersion = testKafkaVersions.get(testKafkaVersions.size() - 1);
 
         // Generate procedures for upgrade
-        Map<String, String> procedures = new HashMap<>() {{
-                put("kafkaVersion", testKafkaVersion.version());
-                put("logMessageVersion", testKafkaVersion.messageVersion());
-                put("interBrokerProtocolVersion", testKafkaVersion.protocolVersion());
-            }};
+        UpgradeKafkaVersion procedures = new UpgradeKafkaVersion(testKafkaVersion.version());
 
         upgradeDataList.getUpgradeData().forEach(upgradeData -> {
             upgradeData.setProcedures(procedures);
@@ -292,13 +265,13 @@ public class UpgradeDowngradeData {
                 ", fromVersion='" + fromVersion + '\'' +
                 ", fromExamples='" + fromExamples + '\'' +
                 ", urlFrom='" + urlFrom + '\'' +
+                ", kafkaVersionsUrlFrom='" + fromKafkaVersionsUrl + '\'' +
                 ", oldestKafka='" + oldestKafka + '\'' +
                 ", defaultKafka='" + defaultKafka + '\'' +
                 ", deployKafkaVersion='" + deployKafkaVersion + '\'' +
                 ", startingKafkaVersion='" + startingKafkaVersion + '\'' +
                 ", featureGatesBefore='" + featureGatesBefore + '\'' +
                 ", featureGatesAfter='" + featureGatesAfter + '\'' +
-                ", conversionTool=" + conversionTool +
                 ", imagesAfterOperations=" + imagesAfterOperations +
                 ", client=" + client +
                 ", environmentInfo=" + environmentInfo +

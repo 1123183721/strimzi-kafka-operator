@@ -69,16 +69,8 @@ public class KafkaUtils {
         return waitForKafkaStatus(namespaceName, clusterName, Ready);
     }
 
-    public static boolean waitForKafkaReady(String clusterName) {
-        return waitForKafkaStatus(kubeClient().getNamespace(), clusterName, Ready);
-    }
-
     public static boolean waitForKafkaNotReady(String namespaceName, String clusterName) {
         return waitForKafkaStatus(namespaceName, clusterName, NotReady);
-    }
-
-    public static boolean waitForKafkaNotReady(String clusterName) {
-        return waitForKafkaStatus(kubeClient().getNamespace(), clusterName, NotReady);
     }
 
     public static boolean waitForKafkaStatus(String namespaceName, String clusterName, Enum<?>  state) {
@@ -101,13 +93,13 @@ public class KafkaUtils {
         });
     }
 
-    public static void waitUntilKafkaStatusConditionContainsMessage(String clusterName, String namespace, String message, long timeout) {
-        TestUtils.waitFor("Kafka Status with message [" + message + "]",
+    public static void waitUntilKafkaStatusConditionContainsMessage(String clusterName, String namespace, String pattern, long timeout) {
+        TestUtils.waitFor("Kafka Status with message [" + pattern + "]",
             Constants.GLOBAL_POLL_INTERVAL, timeout, () -> {
                 List<Condition> conditions = KafkaResource.kafkaClient().inNamespace(namespace).withName(clusterName).get().getStatus().getConditions();
                 for (Condition condition : conditions) {
                     String conditionMessage = condition.getMessage();
-                    if (conditionMessage.matches(message)) {
+                    if (conditionMessage.matches(pattern)) {
                         return true;
                     }
                 }
@@ -115,8 +107,8 @@ public class KafkaUtils {
             });
     }
 
-    public static void waitUntilKafkaStatusConditionContainsMessage(String clusterName, String namespace, String message) {
-        waitUntilKafkaStatusConditionContainsMessage(clusterName, namespace, message, Constants.GLOBAL_STATUS_TIMEOUT);
+    public static void waitUntilKafkaStatusConditionContainsMessage(String clusterName, String namespace, String pattern) {
+        waitUntilKafkaStatusConditionContainsMessage(clusterName, namespace, pattern, Constants.GLOBAL_STATUS_TIMEOUT);
     }
 
     public static void waitForZkMntr(String namespaceName, String clusterName, Pattern pattern, int... podIndexes) {
@@ -236,10 +228,6 @@ public class KafkaUtils {
             count[0] = 0;
             return false;
         });
-    }
-
-    public static void waitForClusterStability(String clusterName) {
-        waitForClusterStability(kubeClient().getNamespace(), clusterName);
     }
 
     /**
@@ -502,4 +490,24 @@ public class KafkaUtils {
     private static String namespacedBootstrapAddress(String clusterName, String namespace, int port) {
         return KafkaResources.bootstrapServiceName(clusterName) + "." + namespace + ".svc:" + port;
     }
+
+
+    public static String bootstrapAddressFromStatus(String clusterName, String namespaceName, String listenerName) {
+
+        List<ListenerStatus> listenerStatusList = KafkaResource.kafkaClient().inNamespace(namespaceName).withName(clusterName).get().getStatus().getListeners();
+
+        if (listenerStatusList == null || listenerStatusList.size() < 1) {
+            LOGGER.error("There is no Kafka external listener specified in the Kafka CR Status");
+            throw new RuntimeException("There is no Kafka external listener specified in the Kafka CR Status");
+        } else if (listenerName == null) {
+            LOGGER.info("Listener name is not specified. Picking the first one from the Kafka Status.");
+            return listenerStatusList.get(0).getBootstrapServers();
+        }
+
+        return listenerStatusList.stream().filter(listener -> listener.getName().equals(listenerName))
+                .findFirst()
+                .orElseThrow(RuntimeException::new)
+                .getBootstrapServers();
+    }
+
 }

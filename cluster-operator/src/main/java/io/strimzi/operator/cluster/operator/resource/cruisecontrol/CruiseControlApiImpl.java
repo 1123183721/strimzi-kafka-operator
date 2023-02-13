@@ -22,12 +22,19 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.core.net.PemTrustOptions;
 
 import java.net.ConnectException;
+import java.net.NoRouteToHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.TimeoutException;
 
+/**
+ * Implementation of the Cruise Control API client
+ */
 public class CruiseControlApiImpl implements CruiseControlApi {
+    /**
+     * Default timeout for the HTTP client (-1 means use the clients default)
+     */
+    public static final int HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS = -1;
     private static final boolean HTTP_CLIENT_ACTIVITY_LOGGING = false;
-    public static final int HTTP_DEFAULT_IDLE_TIMEOUT_SECONDS = -1; // use default internal HTTP client timeout
     private static final String STATUS_KEY = "Status";
 
     private final Vertx vertx;
@@ -36,6 +43,16 @@ public class CruiseControlApiImpl implements CruiseControlApi {
     private HTTPHeader authHttpHeader;
     private PemTrustOptions pto;
 
+    /**
+     * Constructor
+     *
+     * @param vertx             Vert.x instance
+     * @param idleTimeout       Idle timeout
+     * @param ccSecret          Cruise Control Secret
+     * @param ccApiSecret       Cruise Control API Secret
+     * @param apiAuthEnabled    Flag indicating if authentication is enabled
+     * @param apiSslEnabled     Flag indicating if TLS is enabled
+     */
     public CruiseControlApiImpl(Vertx vertx, int idleTimeout, Secret ccSecret, Secret ccApiSecret, Boolean apiAuthEnabled, boolean apiSslEnabled) {
         this.vertx = vertx;
         this.idleTimeout = idleTimeout;
@@ -49,7 +66,7 @@ public class CruiseControlApiImpl implements CruiseControlApi {
         return getCruiseControlState(host, port, verbose, null);
     }
 
-    public HttpClientOptions getHttpClientOptions() {
+    private HttpClientOptions getHttpClientOptions() {
         if (apiSslEnabled) {
             return new HttpClientOptions()
                 .setLogActivity(HTTP_CLIENT_ACTIVITY_LOGGING)
@@ -71,7 +88,7 @@ public class CruiseControlApiImpl implements CruiseControlApi {
         return new HTTPHeader(headerName, headerValue);
     }
 
-    public static HTTPHeader getAuthHttpHeader(boolean apiAuthEnabled, Secret apiSecret) {
+    protected static HTTPHeader getAuthHttpHeader(boolean apiAuthEnabled, Secret apiSecret) {
         if (apiAuthEnabled) {
             String password = new String(Util.decodeFromSecret(apiSecret, CruiseControl.API_ADMIN_PASSWORD_KEY), StandardCharsets.US_ASCII);
             HTTPHeader header = generateAuthHttpHeader(CruiseControl.API_ADMIN_NAME, password);
@@ -82,7 +99,7 @@ public class CruiseControlApiImpl implements CruiseControlApi {
     }
 
     @SuppressWarnings("deprecation")
-    public Future<CruiseControlResponse> getCruiseControlState(String host, int port, boolean verbose, String userTaskId) {
+    private Future<CruiseControlResponse> getCruiseControlState(String host, int port, boolean verbose, String userTaskId) {
 
         String path = new PathBuilder(CruiseControlEndpoints.STATE)
                 .withParameter(CruiseControlParameters.JSON, "true")
@@ -435,10 +452,11 @@ public class CruiseControlApiImpl implements CruiseControlApi {
             // Vert.x throws a NoStackTraceTimeoutException (inherits from TimeoutException) when the request times out
             // so we catch and raise a TimeoutException instead
             result.fail(new TimeoutException(t.getMessage()));
-        } else if (t instanceof ConnectException) {
+        } else if (t instanceof NoRouteToHostException || t instanceof ConnectException) {
+            // Netty throws a AnnotatedNoRouteToHostException (inherits from NoRouteToHostException) when it cannot resolve the host
             // Vert.x throws a AnnotatedConnectException (inherits from ConnectException) when the request times out
-            // so we catch and raise a ConnectException instead
-            result.fail(new ConnectException(t.getMessage()));
+            // so we catch and raise a CruiseControlRetriableConnectionException instead
+            result.fail(new CruiseControlRetriableConnectionException(t));
         } else {
             result.fail(t);
         }

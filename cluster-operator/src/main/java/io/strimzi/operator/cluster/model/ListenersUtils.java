@@ -143,6 +143,16 @@ public class ListenersUtils {
     }
 
     /**
+     * Returns list of all Ingress type listeners
+     *
+     * @param listeners List of all listeners
+     * @return          List of clusterIP listeners
+     */
+    public static List<GenericKafkaListener> clusterIPListeners(List<GenericKafkaListener> listeners)    {
+        return listenersByType(listeners, KafkaListenerType.CLUSTER_IP);
+    }
+
+    /**
      * Returns true if the list has a listener of given type and false otherwise.
      *
      * @param listeners List of all listeners
@@ -205,6 +215,16 @@ public class ListenersUtils {
      */
     public static boolean hasIngressListener(List<GenericKafkaListener> listeners)    {
         return hasListenerOfType(listeners, KafkaListenerType.INGRESS);
+    }
+
+    /**
+     * Checks whether we have at least one ClusterIP listener
+     *
+     * @param listeners List of all listeners
+     * @return          True if at least one ClusterIP listener exists. False otherwise.
+     */
+    public static boolean hasClusterIPListener(List<GenericKafkaListener> listeners)    {
+        return hasListenerOfType(listeners, KafkaListenerType.CLUSTER_IP);
     }
 
     /**
@@ -642,14 +662,14 @@ public class ListenersUtils {
     }
 
     /**
-     * Finds ingress class
+     * Finds controller class which mean ingress class or loadbalancer class
      *
-     * @param listener  Listener for which the ingress class should be found
-     * @return          Ingress class or null if not specified
+     * @param listener  Listener for which the controller class should be found
+     * @return          Controller class or null if not specified
      */
-    public static String ingressClass(GenericKafkaListener listener)    {
+    public static String controllerClass(GenericKafkaListener listener)    {
         if (listener.getConfiguration() != null) {
-            return listener.getConfiguration().getIngressClass();
+            return listener.getConfiguration().getControllerClass();
         } else {
             return null;
         }

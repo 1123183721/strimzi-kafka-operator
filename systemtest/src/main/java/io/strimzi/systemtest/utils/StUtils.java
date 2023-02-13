@@ -47,6 +47,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -157,10 +159,6 @@ public class StUtils {
     public static String checkEnvVarInPod(String namespaceName, String podName, String envVarName) {
         return kubeClient(namespaceName).getPod(podName).getSpec().getContainers().get(0).getEnv()
                 .stream().filter(envVar -> envVar.getName().equals(envVarName)).findFirst().orElseThrow().getValue();
-    }
-
-    public static String checkEnvVarInPod(String podName, String envVarName) {
-        return checkEnvVarInPod(kubeClient().getNamespace(), podName, envVarName);
     }
 
     /**
@@ -449,6 +447,7 @@ public class StUtils {
                 .withKind("Secret")
                 .withNewMetadata()
                     .withName(Environment.SYSTEM_TEST_STRIMZI_IMAGE_PULL_SECRET)
+                    .withNamespace(namespace)
                 .endMetadata()
                 .withType("kubernetes.io/dockerconfigjson")
                 .withData(Collections.singletonMap(".dockerconfigjson", pullSecret.getData().get(".dockerconfigjson")))
@@ -563,10 +562,6 @@ public class StUtils {
         }
     }
 
-    public static Affinity getStatefulSetOrStrimziPodSetAffinity(String resourceName) {
-        return getStatefulSetOrStrimziPodSetAffinity(kubeClient().getNamespace(), resourceName);
-    }
-
     public static Affinity getStatefulSetOrStrimziPodSetAffinity(String namespaceName, String resourceName) {
         if (Environment.isStrimziPodSetEnabled()) {
             Pod firstPod = StrimziPodSetUtils.getFirstPodFromSpec(namespaceName, resourceName);
@@ -584,15 +579,11 @@ public class StUtils {
         }
     }
 
-    public static void deleteStrimziPodSetOrStatefulSet(String resourceName) {
-        deleteStrimziPodSetOrStatefulSet(kubeClient().getNamespace(), resourceName);
-    }
-
-    public static void waitForStrimziPodSetOrStatefulSetRecovery(String resourceName, String resourceUID) {
+    public static void waitForStrimziPodSetOrStatefulSetRecovery(String namespaceName, String resourceName, String resourceUID) {
         if (Environment.isStrimziPodSetEnabled()) {
-            StrimziPodSetUtils.waitForStrimziPodSetRecovery(resourceName, resourceUID);
+            StrimziPodSetUtils.waitForStrimziPodSetRecovery(namespaceName, resourceName, resourceUID);
         } else {
-            StatefulSetUtils.waitForStatefulSetRecovery(resourceName, resourceUID);
+            StatefulSetUtils.waitForStatefulSetRecovery(namespaceName, resourceName, resourceUID);
         }
     }
 
@@ -604,19 +595,11 @@ public class StUtils {
         }
     }
 
-    public static void waitForStrimziPodSetOrStatefulSetAndPodsReady(String resourceName, int expectPods) {
-        waitForStrimziPodSetOrStatefulSetAndPodsReady(kubeClient().getNamespace(), resourceName, expectPods);
-    }
-
     public static String getStrimziPodSetOrStatefulSetUID(String namespaceName, String resourceName) {
         if (Environment.isStrimziPodSetEnabled()) {
             return StrimziPodSetResource.strimziPodSetClient().inNamespace(namespaceName).withName(resourceName).get().getMetadata().getUid();
         }
         return kubeClient(namespaceName).getStatefulSetUid(resourceName);
-    }
-
-    public static String getStrimziPodSetOrStatefulSetUID(String resourceName) {
-        return getStrimziPodSetOrStatefulSetUID(kubeClient().getNamespace(), resourceName);
     }
 
     /**
@@ -640,5 +623,14 @@ public class StUtils {
         }
 
         return cmNames;
+    }
+    public static void waitUntilSuppliersAreMatching(final Supplier<?> sup, final Supplier<?> anotherSup) {
+        TestUtils.waitFor(sup.get() + " is matching with" + anotherSup.get(), Constants.GLOBAL_POLL_INTERVAL,
+                Constants.GLOBAL_STATUS_TIMEOUT, () -> sup.get().equals(anotherSup.get()));
+    }
+
+    public static void waitUntilSupplierIsSatisfied(final BooleanSupplier sup) {
+        TestUtils.waitFor(sup.getAsBoolean() + " is satisfied", Constants.GLOBAL_POLL_INTERVAL,
+                Constants.GLOBAL_STATUS_TIMEOUT, sup);
     }
 }

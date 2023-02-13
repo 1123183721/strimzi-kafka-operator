@@ -10,18 +10,15 @@ import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.strimzi.api.kafka.model.KafkaClusterSpec;
 import io.strimzi.kafka.config.model.ConfigModel;
 import io.strimzi.kafka.config.model.ConfigModels;
-import io.strimzi.kafka.config.model.Scope;
 import io.strimzi.operator.common.Reconciliation;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyList;
 
@@ -29,10 +26,24 @@ import static java.util.Collections.emptyList;
  * Class for handling Kafka configuration passed by the user
  */
 public class KafkaConfiguration extends AbstractConfiguration {
-
+    /**
+     * Configuration key of the inter-broker protocol version option
+     */
     public static final String INTERBROKER_PROTOCOL_VERSION = "inter.broker.protocol.version";
+
+    /**
+     * Configuration key of the message format version option
+     */
     public static final String LOG_MESSAGE_FORMAT_VERSION = "log.message.format.version";
+
+    /**
+     * Configuration key of the default replication factor option
+     */
     public static final String DEFAULT_REPLICATION_FACTOR = "default.replication.factor";
+
+    /**
+     * Configuration key of the min-insync replicas version option
+     */
     public static final String MIN_INSYNC_REPLICAS = "min.insync.replicas";
 
     private static final List<String> FORBIDDEN_PREFIXES;
@@ -68,19 +79,6 @@ public class KafkaConfiguration extends AbstractConfiguration {
      */
     public static KafkaConfiguration unvalidated(Reconciliation reconciliation, String string) {
         return new KafkaConfiguration(reconciliation, string, emptyList());
-    }
-
-    /**
-     * Returns a KafkaConfiguration created without forbidden option filtering.
-     *
-     * @param reconciliation The reconciliation
-     * @param map A map representation of the Properties
-     * @return The KafkaConfiguration
-     */
-    public static KafkaConfiguration unvalidated(Reconciliation reconciliation, Map<String, String> map) {
-        StringBuilder string = new StringBuilder();
-        map.entrySet().forEach(entry -> string.append(entry.getKey() + "=" + entry.getValue() + "\n"));
-        return new KafkaConfiguration(reconciliation, string.toString(), emptyList());
     }
 
     /**
@@ -131,67 +129,6 @@ public class KafkaConfiguration extends AbstractConfiguration {
     }
 
     /**
-     * Return true if the configs in this KafkaConfiguration include any which are read-only.
-     * @param kafkaVersion The broker version.
-     * @return true if the configs in this KafkaConfiguration include any which are read-only.
-     */
-    public boolean anyReadOnly(KafkaVersion kafkaVersion) {
-        Set<String> strings = readOnlyConfigs(kafkaVersion);
-        return !strings.isEmpty();
-    }
-
-    /**
-     * Return the configs in this KafkaConfiguration which are read-only.
-     * @param kafkaVersion The broker version.
-     * @return The read-only configs.
-     */
-    public Set<String> readOnlyConfigs(KafkaVersion kafkaVersion) {
-        return withScope(kafkaVersion, Scope.READ_ONLY);
-    }
-
-    /**
-     * Return the configs in this KafkaConfiguration which are cluster-wide.
-     * @param kafkaVersion The broker version.
-     * @return The cluster-wide configs.
-     */
-    public Set<String> clusterWideConfigs(KafkaVersion kafkaVersion) {
-        return withScope(kafkaVersion, Scope.CLUSTER_WIDE);
-    }
-
-    /**
-     * Return the configs in this KafkaConfiguration which are per-broker.
-     * @param kafkaVersion The broker version.
-     * @return The per-broker configs.
-     */
-    public Set<String> perBrokerConfigs(KafkaVersion kafkaVersion) {
-        return withScope(kafkaVersion, Scope.PER_BROKER);
-    }
-
-    private Set<String> withScope(KafkaVersion kafkaVersion, Scope scope) {
-        Map<String, ConfigModel> c = readConfigModel(kafkaVersion);
-        List<String> configsOfScope = c.entrySet().stream()
-                .filter(config -> scope.equals(config.getValue().getScope()))
-                .map(config -> config.getKey())
-                .collect(Collectors.toList());
-        Set<String> result = new HashSet<>(asOrderedProperties().asMap().keySet());
-        result.retainAll(configsOfScope);
-        return Collections.unmodifiableSet(result);
-    }
-
-    /**
-     * Return the configs in this KafkaConfiguration which are not known broker configs.
-     * These might be consumed by broker plugins.
-     * @param kafkaVersion The broker version.
-     * @return The unknown configs.
-     */
-    public Set<String> unknownConfigs(KafkaVersion kafkaVersion) {
-        Map<String, ConfigModel> c = readConfigModel(kafkaVersion);
-        Set<String> result = new HashSet<>(asOrderedProperties().asMap().keySet());
-        result.removeAll(c.keySet());
-        return result;
-    }
-
-    /**
      * Return the config properties with their values in this KafkaConfiguration which are not known broker configs.
      * These might be consumed by broker plugins.
      * @param kafkaVersion The broker version.
@@ -208,6 +145,9 @@ public class KafkaConfiguration extends AbstractConfiguration {
         return result;
     }
 
+    /**
+     * @return  True if the configuration is empty. False otherwise.
+     */
     public boolean isEmpty() {
         return this.asOrderedProperties().asMap().size() == 0;
     }

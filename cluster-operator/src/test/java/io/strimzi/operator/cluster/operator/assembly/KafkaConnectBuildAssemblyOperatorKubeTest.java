@@ -57,6 +57,8 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
@@ -85,7 +87,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
     private static final String OUTPUT_IMAGE_HASH_STUB = Util.hashStub(OUTPUT_IMAGE);
 
     protected static Vertx vertx;
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_16;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.MINIMAL_SUPPORTED_VERSION;
 
     @BeforeAll
     public static void before() {
@@ -182,7 +184,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build@sha256:blablabla").endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(0)
+                                .withMessage("my-connect-build@sha256:blablabla")
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -218,7 +228,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -240,7 +250,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(2));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                 // Verify status
                 List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();
@@ -332,7 +342,14 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(1).endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(1)
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -365,7 +382,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(1));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                 async.flag();
             })));
@@ -472,7 +489,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build@sha256:blablabla").endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(0)
+                                .withMessage("my-connect-build@sha256:blablabla")
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -508,7 +533,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -522,7 +547,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(2));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                 // Verify status
                 List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();
@@ -635,7 +660,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build-2@sha256:blablabla").endTerminated().endState().build())
+                .withContainerStatuses(new ContainerStatusBuilder()
+                    .withName(KafkaConnectResources.buildPodName(NAME))
+                    .withNewState()
+                        .withNewTerminated()
+                            .withExitCode(0)
+                            .withMessage("my-connect-build-2@sha256:blablabla")
+                        .endTerminated()
+                    .endState()
+                    .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -671,7 +704,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                     List<Deployment> capturedDeps = depCaptor.getAllValues();
                     assertThat(capturedDeps, hasSize(1));
                     Deployment dep = capturedDeps.get(0);
-                    assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                    assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                     assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build-2@sha256:blablabla"));
                     assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + Util.hashStub(build.getBuild().getOutput().getImage())));
 
@@ -685,7 +718,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                     // Verify builder Pod
                     List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                     assertThat(capturedBuilderPods, hasSize(2));
-                    assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                    assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                     // Verify status
                     List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();
@@ -810,7 +843,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build@sha256:blablabla").endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(0)
+                                .withMessage("my-connect-build@sha256:blablabla")
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -846,7 +887,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -857,7 +898,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(1));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(0));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(0));
 
                 // Verify status
                 List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();
@@ -982,7 +1023,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build@sha256:blablabla").endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(0)
+                                .withMessage("my-connect-build@sha256:blablabla")
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
 
@@ -1019,7 +1068,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1033,7 +1082,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(3));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                 // Verify status
                 List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();
@@ -1161,7 +1210,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build@sha256:blablabla").endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(0)
+                                .withMessage("my-connect-build@sha256:blablabla")
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -1197,7 +1254,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1211,7 +1268,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(3));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                 // Verify status
                 List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();
@@ -1329,7 +1386,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1353,6 +1410,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
     }
 
     @Test
+    @SuppressWarnings({"checkstyle:MethodLength"})
     public void testUpdateWithForcedRebuildOnKube(VertxTestContext context) {
         Plugin plugin1 = new PluginBuilder()
                 .withName("plugin1")
@@ -1410,9 +1468,16 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
         when(mockDepOps.reconcile(any(), anyString(), anyString(), depCaptor.capture())).thenReturn(Future.succeededFuture());
         when(mockDepOps.getAsync(eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)))).thenAnswer(inv -> {
             Deployment dep = connect.generateDeployment(emptyMap(), false, null, null);
+
+            if (dep.getMetadata().getAnnotations() != null) {
+                dep.getMetadata().getAnnotations().put(Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, "true");
+            } else {
+                dep.getMetadata().setAnnotations(Map.of(Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, "true"));
+            }
+
             dep.getSpec().getTemplate().getMetadata().getAnnotations().put(Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, build.generateDockerfile().hashStub());
-            dep.getMetadata().getAnnotations().put(Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, "true");
             dep.getSpec().getTemplate().getSpec().getContainers().get(0).setImage("my-connect-build@sha256:blablabla");
+
             return Future.succeededFuture(dep);
         });
         when(mockDepOps.scaleUp(any(), anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(42));
@@ -1438,7 +1503,15 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 .withNewSpec()
                 .endSpec()
                 .withNewStatus()
-                    .withContainerStatuses(new ContainerStatusBuilder().withNewState().withNewTerminated().withExitCode(0).withMessage("my-connect-build@sha256:rebuiltblablabla").endTerminated().endState().build())
+                    .withContainerStatuses(new ContainerStatusBuilder()
+                        .withName(KafkaConnectResources.buildPodName(NAME))
+                        .withNewState()
+                            .withNewTerminated()
+                                .withExitCode(0)
+                                .withMessage("my-connect-build@sha256:rebuiltblablabla")
+                            .endTerminated()
+                        .endState()
+                        .build())
                 .endStatus()
                 .build();
         when(mockPodOps.waitFor(any(), eq(NAMESPACE), eq(KafkaConnectResources.buildPodName(NAME)), anyString(), anyLong(), anyLong(), any(BiPredicate.class))).thenReturn(Future.succeededFuture((Void) null));
@@ -1472,7 +1545,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:rebuiltblablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1486,7 +1559,7 @@ public class KafkaConnectBuildAssemblyOperatorKubeTest {
                 // Verify builder Pod
                 List<Pod> capturedBuilderPods = builderPodCaptor.getAllValues();
                 assertThat(capturedBuilderPods, hasSize(3));
-                assertThat(capturedBuilderPods.stream().filter(pod -> pod != null).collect(Collectors.toList()), hasSize(1));
+                assertThat(capturedBuilderPods.stream().filter(Objects::nonNull).collect(Collectors.toList()), hasSize(1));
 
                 // Verify status
                 List<KafkaConnect> capturedConnects = connectCaptor.getAllValues();

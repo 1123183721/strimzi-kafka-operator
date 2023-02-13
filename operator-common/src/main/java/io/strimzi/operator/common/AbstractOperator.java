@@ -5,11 +5,9 @@
 package io.strimzi.operator.common;
 
 import io.fabric8.kubernetes.api.model.LabelSelector;
-import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.client.CustomResource;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.WatcherException;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Meter;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.Tags;
@@ -20,12 +18,10 @@ import io.strimzi.api.kafka.model.status.ConditionBuilder;
 import io.strimzi.api.kafka.model.status.Status;
 import io.strimzi.operator.cluster.model.InvalidResourceException;
 import io.strimzi.operator.cluster.model.StatusDiff;
+import io.strimzi.operator.common.metrics.OperatorMetricsHolder;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.common.model.NamespaceAndName;
-import io.strimzi.operator.common.model.ResourceVisitor;
-import io.strimzi.operator.common.model.ValidationVisitor;
-import io.strimzi.operator.common.operator.resource.AbstractWatchableStatusedResourceOperator;
-import io.strimzi.operator.common.operator.resource.ReconcileResult;
+import io.strimzi.operator.common.operator.resource.AbstractWatchableStatusedNamespacedResourceOperator;
 import io.strimzi.operator.common.operator.resource.StatusUtils;
 import io.strimzi.operator.common.operator.resource.TimeoutException;
 import io.vertx.core.AsyncResult;
@@ -36,8 +32,6 @@ import io.vertx.core.Vertx;
 import io.vertx.core.shareddata.Lock;
 
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -57,7 +51,7 @@ import static io.strimzi.operator.common.Util.async;
  * {@link #reconcile(Reconciliation)} by delegating to abstract {@link #createOrUpdate(Reconciliation, CustomResource)}
  * and {@link #delete(Reconciliation)} methods for subclasses to implement.
  *
- * <li>add support for operator-side {@linkplain #validate(Reconciliation, CustomResource) validation}.
+ * <li>add support for operator-side {@linkplain StatusUtils#validate(Reconciliation, CustomResource)} validation}.
  *     This can be used to automatically log warnings about source resources which used deprecated part of the CR API.
  *ą
  * </ul>
@@ -69,13 +63,17 @@ public abstract class AbstractOperator<
         T extends CustomResource<P, S>,
         P extends Spec,
         S extends Status,
-        O extends AbstractWatchableStatusedResourceOperator<?, T, ?, ?>>
+        O extends AbstractWatchableStatusedNamespacedResourceOperator<?, T, ?, ?>>
             implements Operator {
 
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(AbstractOperator.class);
 
     private static final long PROGRESS_WARNING = 60_000L;
     protected static final int LOCK_TIMEOUT_MS = 10000;
+
+    /**
+     * Prefix used for metrics provided by Strimzi operators
+     */
     public static final String METRICS_PREFIX = "strimzi.";
 
     protected final Vertx vertx;
@@ -84,37 +82,52 @@ public abstract class AbstractOperator<
 
     private final Optional<LabelSelector> selector;
 
-    protected final MetricsProvider metrics;
+    protected final OperatorMetricsHolder metrics;
 
-    private final Labels selectorLabels;
     private Map<String, AtomicInteger> resourcesStateCounter = new ConcurrentHashMap<>(1);
-    private Map<String, AtomicInteger> resourceCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, AtomicInteger> pausedResourceCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, Counter> periodicReconciliationsCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, Counter> reconciliationsCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, Counter> failedReconciliationsCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, Counter> successfulReconciliationsCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, Counter> lockedReconciliationsCounterMap = new ConcurrentHashMap<>(1);
-    private Map<String, Timer> reconciliationsTimerMap = new ConcurrentHashMap<>(1);
 
-    public AbstractOperator(Vertx vertx, String kind, O resourceOperator, MetricsProvider metrics, Labels selectorLabels) {
+    /**
+     * Constructs the AbstractOperator. This constructor is used to construct the AbstractOperator using the
+     * OperatorMetricsHolder instance. This constructor is used by subclasses which want to use specialized metrics
+     * ¨holder such as the subclasses dealing with KafkaConnector resources and their metrics.
+     *
+     * @param vertx             Vert.x instance
+     * @param kind              Resource kind which will be operated by this operator
+     * @param resourceOperator  Resource operator for given custom resource
+     * @param metrics           MetricsHolder for managing operator metrics
+     * @param selectorLabels    Selector labels for selecting custom resources which should be operated
+     */
+    public AbstractOperator(Vertx vertx, String kind, O resourceOperator, OperatorMetricsHolder metrics, Labels selectorLabels) {
         this.vertx = vertx;
         this.kind = kind;
         this.resourceOperator = resourceOperator;
         this.selector = (selectorLabels == null || selectorLabels.toMap().isEmpty()) ? Optional.empty() : Optional.of(new LabelSelector(null, selectorLabels.toMap()));
         this.metrics = metrics;
-        this.selectorLabels = selectorLabels;
     }
 
-    @Override
-    public void resetCounters() {
-        resourceCounterMap.entrySet().forEach(entry -> entry.getValue().set(0));
-        pausedResourceCounterMap.entrySet().forEach(entry -> entry.getValue().set(0));
+    /**
+     * Constructs the AbstractOperator. This constructor is used to construct the AbstractOperator using the
+     * MetricsProvider instance, which is used to create OperatorMetricsHolder inside the constructor. It is used by
+     * subclasses which do not need a more specialized type of metrics holder.
+     *
+     * @param vertx             Vert.x instance
+     * @param kind              Resource kind which will be operated by this operator
+     * @param resourceOperator  Resource operator for given custom resource
+     * @param metricsProvider   Metrics provider which should be used to create the OperatorMetricsHolder instance
+     * @param selectorLabels    Selector labels for selecting custom resources which should be operated
+     */
+    public AbstractOperator(Vertx vertx, String kind, O resourceOperator, MetricsProvider metricsProvider, Labels selectorLabels) {
+        this(vertx, kind, resourceOperator, new OperatorMetricsHolder(kind, selectorLabels, metricsProvider), selectorLabels);
     }
 
     @Override
     public String kind() {
         return kind;
+    }
+
+    @Override
+    public OperatorMetricsHolder metrics()   {
+        return metrics;
     }
 
     /**
@@ -164,8 +177,8 @@ public abstract class AbstractOperator<
         String namespace = reconciliation.namespace();
         String name = reconciliation.name();
 
-        reconciliationsCounter(reconciliation.namespace()).increment();
-        Timer.Sample reconciliationTimerSample = Timer.start(metrics.meterRegistry());
+        metrics().reconciliationsCounter(reconciliation.namespace()).increment();
+        Timer.Sample reconciliationTimerSample = Timer.start(metrics().metricsProvider().meterRegistry());
 
         Future<Void> handler = withLock(reconciliation, LOCK_TIMEOUT_MS, () -> {
             T cr = resourceOperator.get(namespace, name);
@@ -184,7 +197,7 @@ public abstract class AbstractOperator<
                 Promise<Void> createOrUpdate = Promise.promise();
                 if (Annotations.isReconciliationPausedWithAnnotation(cr)) {
                     S status = createStatus();
-                    Set<Condition> conditions = validate(reconciliation, cr);
+                    Set<Condition> conditions = StatusUtils.validate(reconciliation, cr);
                     conditions.add(StatusUtils.getPausedCondition());
                     status.setConditions(new ArrayList<>(conditions));
                     status.setObservedGeneration(cr.getStatus() != null ? cr.getStatus().getObservedGeneration() : 0);
@@ -196,7 +209,7 @@ public abstract class AbstractOperator<
                             createOrUpdate.fail(statusResult.cause());
                         }
                     });
-                    pausedResourceCounter(namespace).getAndIncrement();
+                    metrics().pausedResourceCounter(namespace).getAndIncrement();
                     LOGGER.infoCr(reconciliation, "Reconciliation of {} {} is paused", kind, name);
                     return createOrUpdate.future();
                 } else if (cr.getSpec() == null) {
@@ -221,7 +234,7 @@ public abstract class AbstractOperator<
                     return createOrUpdate.future();
                 }
 
-                Set<Condition> unknownAndDeprecatedConditions = validate(reconciliation, cr);
+                Set<Condition> unknownAndDeprecatedConditions = StatusUtils.validate(reconciliation, cr);
 
                 LOGGER.infoCr(reconciliation, "{} {} will be checked for creation or modification", kind, name);
 
@@ -230,7 +243,7 @@ public abstract class AbstractOperator<
                             if (res.succeeded()) {
                                 S status = res.result();
 
-                                addWarningsToStatus(status, unknownAndDeprecatedConditions);
+                                StatusUtils.addConditionsToStatus(status, unknownAndDeprecatedConditions);
                                 updateStatus(reconciliation, status).onComplete(statusResult -> {
                                     if (statusResult.succeeded()) {
                                         createOrUpdate.complete();
@@ -242,7 +255,7 @@ public abstract class AbstractOperator<
                                 if (res.cause() instanceof ReconciliationException) {
                                     ReconciliationException e = (ReconciliationException) res.cause();
                                     Status status = e.getStatus();
-                                    addWarningsToStatus(status, unknownAndDeprecatedConditions);
+                                    StatusUtils.addConditionsToStatus(status, unknownAndDeprecatedConditions);
 
                                     LOGGER.errorCr(reconciliation, "createOrUpdate failed", e.getCause());
 
@@ -283,12 +296,6 @@ public abstract class AbstractOperator<
         });
 
         return result.future();
-    }
-
-    protected void addWarningsToStatus(Status status, Set<Condition> unknownAndDeprecatedConditions)   {
-        if (status != null)  {
-            status.addConditions(unknownAndDeprecatedConditions);
-        }
     }
 
     /**
@@ -441,27 +448,6 @@ public abstract class AbstractOperator<
         return Future.succeededFuture();
     }
 
-    /**
-     * Validate the Custom Resource.
-     * This should log at the WARN level (rather than throwing)
-     * if the resource can safely be reconciled (e.g. it merely using deprecated API).
-     * @param reconciliation The reconciliation
-     * @param resource The custom resource
-     * @throws InvalidResourceException if the resource cannot be safely reconciled.
-     * @return set of conditions
-     */
-    /*test*/ public Set<Condition> validate(Reconciliation reconciliation, T resource) {
-        if (resource != null) {
-            Set<Condition> warningConditions = new LinkedHashSet<>(0);
-
-            ResourceVisitor.visit(reconciliation, resource, new ValidationVisitor(resource, LOGGER, warningConditions));
-
-            return warningConditions;
-        }
-
-        return Collections.emptySet();
-    }
-
     public Future<Set<NamespaceAndName>> allResourceNames(String namespace) {
         return resourceOperator.listAsync(namespace, selector())
                 .map(resourceList ->
@@ -491,6 +477,13 @@ public abstract class AbstractOperator<
         return async(vertx, () -> resourceOperator.watch(namespace, selector(), new OperatorWatcher<>(this, namespace, onClose)));
     }
 
+    /**
+     * Recreates a Kubernetes watch
+     *
+     * @param namespace Namespace which should be watched
+     *
+     * @return  Consumer for a Watched exception
+     */
     public Consumer<WatcherException> recreateWatch(String namespace) {
         Consumer<WatcherException> kubernetesClientExceptionConsumer = new Consumer<WatcherException>() {
             @Override
@@ -512,69 +505,26 @@ public abstract class AbstractOperator<
     private void handleResult(Reconciliation reconciliation, AsyncResult<Void> result, Timer.Sample reconciliationTimerSample) {
         if (result.succeeded()) {
             updateResourceState(reconciliation, true, null);
-            successfulReconciliationsCounter(reconciliation.namespace()).increment();
-            reconciliationTimerSample.stop(reconciliationsTimer(reconciliation.namespace()));
+            metrics().successfulReconciliationsCounter(reconciliation.namespace()).increment();
+            reconciliationTimerSample.stop(metrics().reconciliationsTimer(reconciliation.namespace()));
             LOGGER.infoCr(reconciliation, "reconciled");
         } else {
             Throwable cause = result.cause();
 
             if (cause instanceof InvalidConfigParameterException) {
                 updateResourceState(reconciliation, false, cause);
-                failedReconciliationsCounter(reconciliation.namespace()).increment();
-                reconciliationTimerSample.stop(reconciliationsTimer(reconciliation.namespace()));
+                metrics().failedReconciliationsCounter(reconciliation.namespace()).increment();
+                reconciliationTimerSample.stop(metrics().reconciliationsTimer(reconciliation.namespace()));
                 LOGGER.warnCr(reconciliation, "Failed to reconcile {}", cause.getMessage());
             } else if (cause instanceof UnableToAcquireLockException) {
-                lockedReconciliationsCounter(reconciliation.namespace()).increment();
+                metrics().lockedReconciliationsCounter(reconciliation.namespace()).increment();
             } else  {
                 updateResourceState(reconciliation, false, cause);
-                failedReconciliationsCounter(reconciliation.namespace()).increment();
-                reconciliationTimerSample.stop(reconciliationsTimer(reconciliation.namespace()));
+                metrics().failedReconciliationsCounter(reconciliation.namespace()).increment();
+                reconciliationTimerSample.stop(metrics().reconciliationsTimer(reconciliation.namespace()));
                 LOGGER.warnCr(reconciliation, "Failed to reconcile", cause);
             }
         }
-    }
-
-    @Override
-    public Counter periodicReconciliationsCounter(String namespace) {
-        return Operator.getCounter(namespace, kind(), METRICS_PREFIX + "reconciliations.periodical", metrics, selectorLabels, periodicReconciliationsCounterMap,
-                "Number of periodical reconciliations done by the operator");
-    }
-
-    public Counter reconciliationsCounter(String namespace) {
-        return Operator.getCounter(namespace, kind(), METRICS_PREFIX + "reconciliations", metrics, selectorLabels, reconciliationsCounterMap,
-                "Number of reconciliations done by the operator for individual resources");
-    }
-
-    public Counter failedReconciliationsCounter(String namespace) {
-        return Operator.getCounter(namespace, kind(), METRICS_PREFIX + "reconciliations.failed", metrics, selectorLabels, failedReconciliationsCounterMap,
-                "Number of reconciliations done by the operator for individual resources which failed");
-    }
-
-    public Counter successfulReconciliationsCounter(String namespace) {
-        return Operator.getCounter(namespace, kind(), METRICS_PREFIX + "reconciliations.successful", metrics, selectorLabels, successfulReconciliationsCounterMap,
-                "Number of reconciliations done by the operator for individual resources which were successful");
-    }
-
-    public Counter lockedReconciliationsCounter(String namespace) {
-        return Operator.getCounter(namespace, kind(), METRICS_PREFIX + "reconciliations.locked", metrics, selectorLabels, lockedReconciliationsCounterMap,
-                "Number of reconciliations skipped because another reconciliation for the same resource was still running");
-    }
-
-    @Override
-    public AtomicInteger resourceCounter(String namespace) {
-        return Operator.getGauge(namespace, kind(), METRICS_PREFIX + "resources", metrics, selectorLabels, resourceCounterMap,
-                "Number of custom resources the operator sees");
-    }
-
-    @Override
-    public AtomicInteger pausedResourceCounter(String namespace) {
-        return Operator.getGauge(namespace, kind(), METRICS_PREFIX + "resources.paused", metrics, selectorLabels, pausedResourceCounterMap,
-                "Number of custom resources the operator sees but does not reconcile due to paused reconciliations");
-    }
-
-    public Timer reconciliationsTimer(String namespace) {
-        return Operator.getTimer(namespace, kind(), METRICS_PREFIX + "reconciliations.duration", metrics, selectorLabels, reconciliationsTimerMap,
-                "The time the reconciliation takes to complete");
     }
 
     /**
@@ -595,7 +545,7 @@ public abstract class AbstractOperator<
 
         T cr = resourceOperator.get(reconciliation.namespace(), reconciliation.name());
 
-        Optional<Meter> metric = metrics.meterRegistry().getMeters()
+        Optional<Meter> metric = metrics().metricsProvider().meterRegistry().getMeters()
                 .stream()
                 .filter(meter -> meter.getId().getName().equals(METRICS_PREFIX + "resource.state") &&
                         meter.getId().getTags().contains(Tag.of("kind", reconciliation.kind())) &&
@@ -605,43 +555,17 @@ public abstract class AbstractOperator<
 
         if (metric.isPresent()) {
             // remove metric so it can be re-added with new tags
-            metrics.meterRegistry().remove(metric.get().getId());
+            metrics().metricsProvider().meterRegistry().remove(metric.get().getId());
             resourcesStateCounter.remove(key);
             LOGGER.debugCr(reconciliation, "Removed metric " + METRICS_PREFIX + "resource.state{}", key);
         }
 
         if (cr != null && Util.matchesSelector(selector(), cr)) {
             resourcesStateCounter.computeIfAbsent(key, tags ->
-                    metrics.gauge(METRICS_PREFIX + "resource.state", "Current state of the resource: 1 ready, 0 fail", metricTags)
+                    metrics().metricsProvider().gauge(METRICS_PREFIX + "resource.state", "Current state of the resource: 1 ready, 0 fail", metricTags)
             );
             resourcesStateCounter.get(key).set(ready ? 1 : 0);
             LOGGER.debugCr(reconciliation, "Updated metric " + METRICS_PREFIX + "resource.state{} = {}", metricTags, ready ? 1 : 0);
         }
     }
-
-    /**
-     * In some cases, when the ClusterRoleBinding reconciliation fails with RBAC error and the desired object is null,
-     * we want to ignore the error and return success. This is used to let Strimzi work without some Cluster-wide RBAC
-     * rights when the features they are needed for are not used by the user.
-     *
-     * @param reconciliation    The reconciliation
-     * @param reconcileFuture   The original reconciliation future
-     * @param desired           The desired state of the resource.
-     * @return                  A future which completes when the resource was reconciled.
-     */
-    public Future<ReconcileResult<ClusterRoleBinding>> withIgnoreRbacError(Reconciliation reconciliation, Future<ReconcileResult<ClusterRoleBinding>> reconcileFuture, ClusterRoleBinding desired) {
-        return reconcileFuture.compose(
-            rr -> Future.succeededFuture(),
-            e -> {
-                if (desired == null
-                        && e.getMessage() != null
-                        && e.getMessage().contains("Message: Forbidden!")) {
-                    LOGGER.debugCr(reconciliation, "Ignoring forbidden access to ClusterRoleBindings resource which does not seem to be required.");
-                    return Future.succeededFuture();
-                }
-                return Future.failedFuture(e.getMessage());
-            }
-        );
-    }
-
 }

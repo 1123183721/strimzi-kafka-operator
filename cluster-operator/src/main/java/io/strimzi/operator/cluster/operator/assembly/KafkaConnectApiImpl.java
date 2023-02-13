@@ -42,17 +42,12 @@ import io.vertx.core.json.JsonObject;
 
 import static java.util.Arrays.asList;
 
-@SuppressWarnings({"deprecation"})
 class KafkaConnectApiImpl implements KafkaConnectApi {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaConnectApiImpl.class);
-    public static final TypeReference<Map<String, Object>> TREE_TYPE = new TypeReference<Map<String, Object>>() {
-    };
-    public static final TypeReference<Map<String, String>> MAP_OF_STRINGS = new TypeReference<Map<String, String>>() {
-    };
-    public static final TypeReference<Map<String, Map<String, String>>> MAP_OF_MAP_OF_STRINGS = new TypeReference<Map<String, Map<String, String>>>() {
-    };
-    public static final TypeReference<Map<String, Map<String, List<String>>>> MAP_OF_MAP_OF_LIST_OF_STRING = new TypeReference<Map<String, Map<String, List<String>>>>() {
-    };
+    public static final TypeReference<Map<String, Object>> TREE_TYPE = new TypeReference<>() { };
+    public static final TypeReference<Map<String, String>> MAP_OF_STRINGS = new TypeReference<>() { };
+    public static final TypeReference<Map<String, Map<String, String>>> MAP_OF_MAP_OF_STRINGS = new TypeReference<>() { };
+    public static final TypeReference<Map<String, Map<String, List<String>>>> MAP_OF_MAP_OF_LIST_OF_STRING = new TypeReference<>() { };
     private final ObjectMapper mapper = new ObjectMapper();
     private final Vertx vertx;
 
@@ -82,6 +77,7 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                             if (response.result().statusCode() == 200 || response.result().statusCode() == 201) {
                                 response.result().bodyHandler(buffer -> {
                                     try {
+                                        @SuppressWarnings({ "rawtypes" })
                                         Map t = mapper.readValue(buffer.getBytes(), Map.class);
                                         LOGGER.debugCr(reconciliation, "Got {} response to PUT request to {}: {}", response.result().statusCode(), path, t);
                                         result.complete(t);
@@ -554,16 +550,17 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
     }
 
     @Override
-    public Future<Void> restart(String host, int port, String connectorName) {
-        return restartConnectorOrTask(host, port, "/connectors/" + connectorName + "/restart");
+    public Future<Map<String, Object>> restart(String host, int port, String connectorName, boolean includeTasks, boolean onlyFailed) {
+        return restartConnectorOrTask(host, port, "/connectors/" + connectorName + "/restart?includeTasks=" + includeTasks + "&onlyFailed=" + onlyFailed);
     }
 
     @Override
     public Future<Void> restartTask(String host, int port, String connectorName, int taskID) {
-        return restartConnectorOrTask(host, port, "/connectors/" + connectorName + "/tasks/" + taskID + "/restart");
+        return restartConnectorOrTask(host, port, "/connectors/" + connectorName + "/tasks/" + taskID + "/restart")
+            .compose(result -> Future.succeededFuture());
     }
 
-    private Future<Void> restartConnectorOrTask(String host, int port, String path) {
+    private Future<Map<String, Object>> restartConnectorOrTask(String host, int port, String path) {
         return HttpClientUtils.withHttpClient(vertx, new HttpClientOptions().setLogActivity(true), (httpClient, result) ->
             httpClient.request(HttpMethod.POST, port, host, path, request -> {
                 if (request.succeeded()) {
@@ -571,9 +568,18 @@ class KafkaConnectApiImpl implements KafkaConnectApi {
                             .putHeader("Accept", "application/json");
                     request.result().send(response -> {
                         if (response.succeeded()) {
-                            if (response.result().statusCode() == 204) {
+                            if (response.result().statusCode() == 202) {
                                 response.result().bodyHandler(body -> {
-                                    result.complete();
+                                    try {
+                                        var status = mapper.readValue(body.getBytes(), TREE_TYPE);
+                                        result.complete(status);
+                                    } catch (IOException e) {
+                                        result.fail(new ConnectRestException(response.result(), "Failed to parse restart status response", e));
+                                    }
+                                });
+                            } else if (response.result().statusCode() == 204) {
+                                response.result().bodyHandler(body -> {
+                                    result.complete(null);
                                 });
                             } else {
                                 result.fail("Unexpected status code " + response.result().statusCode()

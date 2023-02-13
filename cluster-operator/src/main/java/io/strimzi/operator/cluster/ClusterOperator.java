@@ -10,19 +10,21 @@ import io.strimzi.operator.cluster.operator.assembly.AbstractConnectOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaBridgeAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaConnectAssemblyOperator;
+import io.strimzi.operator.cluster.operator.assembly.KafkaMirrorMaker2AssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaMirrorMakerAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.KafkaRebalanceAssemblyOperator;
 import io.strimzi.operator.cluster.operator.assembly.StrimziPodSetController;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.AbstractOperator;
-import io.strimzi.operator.cluster.operator.assembly.KafkaMirrorMaker2AssemblyOperator;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.CompositeFuture;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
-import io.vertx.core.http.HttpServer;
+import io.vertx.core.WorkerExecutor;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -31,9 +33,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import static java.util.Arrays.asList;
-import io.micrometer.prometheus.PrometheusMeterRegistry;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 /**
  * An "operator" for managing assemblies of various types <em>in a particular namespace</em>.
@@ -46,8 +45,6 @@ public class ClusterOperator extends AbstractVerticle {
 
     private static final String NAME_SUFFIX = "-cluster-operator";
     private static final String CERTS_SUFFIX = NAME_SUFFIX + "-certs";
-
-    private static final int HEALTH_SERVER_PORT = 8080;
 
     private final KubernetesClient client;
     private final String namespace;
@@ -66,6 +63,24 @@ public class ClusterOperator extends AbstractVerticle {
 
     private StrimziPodSetController strimziPodSetController;
 
+    // this field is required to keep the underlying shared worker pool alive
+    @SuppressWarnings("unused")
+    private WorkerExecutor sharedWorkerExecutor;
+
+    /**
+     * Constructor
+     *
+     * @param namespace                             Namespace which this operator instance manages
+     * @param config                                Cluster Operator configuration
+     * @param client                                Kubernetes client
+     * @param kafkaAssemblyOperator                 Kafka operator
+     * @param kafkaConnectAssemblyOperator          KafkaConnect operator
+     * @param kafkaMirrorMakerAssemblyOperator      KafkaMirrorMaker operator
+     * @param kafkaMirrorMaker2AssemblyOperator     KafkaMirrorMaker2 operator
+     * @param kafkaBridgeAssemblyOperator           KafkaBridge operator
+     * @param kafkaRebalanceAssemblyOperator        KafkaRebalance operator
+     * @param resourceOperatorSupplier              Resource operator supplier
+     */
     public ClusterOperator(String namespace,
                            ClusterOperatorConfig config,
                            KubernetesClient client,
@@ -94,33 +109,29 @@ public class ClusterOperator extends AbstractVerticle {
         LOGGER.info("Starting ClusterOperator for namespace {}", namespace);
 
         // Configure the executor here, but it is used only in other places
-        getVertx().createSharedWorkerExecutor("kubernetes-ops-pool", config.getOperationsThreadPoolSize(), TimeUnit.SECONDS.toNanos(120));
-
-        if (config.featureGates().useStrimziPodSetsEnabled()) {
-            strimziPodSetController = new StrimziPodSetController(namespace, config.getCustomResourceSelector(), resourceOperatorSupplier.kafkaOperator, resourceOperatorSupplier.strimziPodSetOperator, resourceOperatorSupplier.podOperations, config.getPodSetControllerWorkQueueSize());
-            strimziPodSetController.start();
-        }
+        sharedWorkerExecutor = getVertx().createSharedWorkerExecutor("kubernetes-ops-pool", config.getOperationsThreadPoolSize(), TimeUnit.SECONDS.toNanos(120));
 
         @SuppressWarnings({ "rawtypes" })
-        List<Future> watchFutures = new ArrayList<>(8);
+        List<Future> startFutures = new ArrayList<>(8);
+        startFutures.add(maybeStartStrimziPodSetController());
 
         if (!config.isPodSetReconciliationOnly()) {
             List<AbstractOperator<?, ?, ?, ?>> operators = new ArrayList<>(asList(
                     kafkaAssemblyOperator, kafkaMirrorMakerAssemblyOperator,
                     kafkaConnectAssemblyOperator, kafkaBridgeAssemblyOperator, kafkaMirrorMaker2AssemblyOperator));
             for (AbstractOperator<?, ?, ?, ?> operator : operators) {
-                watchFutures.add(operator.createWatch(namespace, operator.recreateWatch(namespace)).compose(w -> {
+                startFutures.add(operator.createWatch(namespace, operator.recreateWatch(namespace)).compose(w -> {
                     LOGGER.info("Opened watch for {} operator", operator.kind());
                     watchByKind.put(operator.kind(), w);
                     return Future.succeededFuture();
                 }));
             }
 
-            watchFutures.add(AbstractConnectOperator.createConnectorWatch(kafkaConnectAssemblyOperator, namespace, config.getCustomResourceSelector()));
-            watchFutures.add(kafkaRebalanceAssemblyOperator.createRebalanceWatch(namespace));
+            startFutures.add(AbstractConnectOperator.createConnectorWatch(kafkaConnectAssemblyOperator, namespace, config.getCustomResourceSelector()));
+            startFutures.add(kafkaRebalanceAssemblyOperator.createRebalanceWatch(namespace));
         }
 
-        CompositeFuture.join(watchFutures)
+        CompositeFuture.join(startFutures)
                 .compose(f -> {
                     LOGGER.info("Setting up periodic reconciliation for namespace {}", namespace);
                     this.reconcileTimer = vertx.setPeriodic(this.config.getReconciliationIntervalMs(), res2 -> {
@@ -129,11 +140,29 @@ public class ClusterOperator extends AbstractVerticle {
                             reconcileAll("timer");
                         }
                     });
-                    return startHealthServer().map((Void) null);
+
+                    return Future.succeededFuture((Void) null);
                 })
                 .onComplete(start);
     }
 
+    private Future<Void> maybeStartStrimziPodSetController() {
+        Promise<Void> handler = Promise.promise();
+        vertx.executeBlocking(future -> {
+            try {
+                if (config.featureGates().useStrimziPodSetsEnabled()) {
+                    strimziPodSetController = new StrimziPodSetController(namespace, config.getCustomResourceSelector(), resourceOperatorSupplier.kafkaOperator,
+                            resourceOperatorSupplier.strimziPodSetOperator, resourceOperatorSupplier.podOperations, resourceOperatorSupplier.metricsProvider, config.getPodSetControllerWorkQueueSize());
+                    strimziPodSetController.start();
+                }
+                future.complete();
+            } catch (Throwable e) {
+                LOGGER.error("StrimziPodSetController start failed");
+                future.fail(e);
+            }
+        }, handler);
+        return handler.future();
+    }
 
     @Override
     public void stop(Promise<Void> stop) {
@@ -170,34 +199,12 @@ public class ClusterOperator extends AbstractVerticle {
     }
 
     /**
-     * Start an HTTP health server
+     * Name of the secret with the Cluster Operator certificates for connecting to the cluster
+     *
+     * @param cluster   Name of the Kafka cluster
+     *
+     * @return  Name of the Cluster Operator certificate secret
      */
-    private Future<HttpServer> startHealthServer() {
-        Promise<HttpServer> result = Promise.promise();
-        this.vertx.createHttpServer()
-                .requestHandler(request -> {
-
-                    if (request.path().equals("/healthy")) {
-                        request.response().setStatusCode(200).end();
-                    } else if (request.path().equals("/ready")) {
-                        request.response().setStatusCode(200).end();
-                    } else if (request.path().equals("/metrics")) {
-                        PrometheusMeterRegistry metrics = (PrometheusMeterRegistry) resourceOperatorSupplier.metricsProvider.meterRegistry();
-                        request.response().setStatusCode(200)
-                                .end(metrics.scrape());
-                    }
-                })
-                .listen(HEALTH_SERVER_PORT, ar -> {
-                    if (ar.succeeded()) {
-                        LOGGER.info("ClusterOperator is now ready (health server listening on {})", HEALTH_SERVER_PORT);
-                    } else {
-                        LOGGER.error("Unable to bind health server on {}", HEALTH_SERVER_PORT, ar.cause());
-                    }
-                    result.handle(ar);
-                });
-        return result.future();
-    }
-
     public static String secretName(String cluster) {
         return cluster + CERTS_SUFFIX;
     }

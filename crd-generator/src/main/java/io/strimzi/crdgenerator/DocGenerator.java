@@ -46,7 +46,7 @@ import static java.lang.Integer.max;
 import static java.util.Collections.emptySet;
 import static java.util.Collections.singletonList;
 
-public class DocGenerator {
+class DocGenerator {
 
     private static final String NL = System.lineSeparator();
     private static final Pattern DOT_AT_THE_END = Pattern.compile(".*[.!?]$", Pattern.DOTALL);
@@ -293,7 +293,7 @@ public class DocGenerator {
     }
 
     private String getDeprecation(Property property, DeprecatedProperty deprecated) {
-        String msg = String.format("*The `%s` property has been deprecated",
+        String msg = String.format("**The `%s` property has been deprecated",
                 property.getName());
         if (!deprecated.movedToPath().isEmpty()) {
             msg += ", and should now be configured using `" + deprecated.movedToPath() + "`";
@@ -301,7 +301,7 @@ public class DocGenerator {
         if (!deprecated.removalVersion().isEmpty()) {
             msg += ". The property " + property.getName() + " is removed in API version `" + deprecated.removalVersion() + "`";
         }
-        msg += ".* ";
+        msg += ".** ";
         if (!deprecated.description().isEmpty()) {
             msg += deprecated.description() + " ";
         }
@@ -421,9 +421,12 @@ public class DocGenerator {
                 }
                 out.append(".*").append(NL);
 
-                out.append("Please use ");
-                typeLink(crd, out, replacementClss);
-                out.append(" instead.").append(NL);
+                if (replacementClss != void.class) {
+                    out.append("Please use ");
+                    typeLink(crd, out, replacementClss);
+                    out.append(" instead.").append(NL);
+                }
+
                 out.append(NL);
             }
         }

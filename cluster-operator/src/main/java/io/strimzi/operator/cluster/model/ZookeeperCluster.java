@@ -6,45 +6,41 @@ package io.strimzi.operator.cluster.model;
 
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
-import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.ContainerPort;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.IntOrString;
-import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.Secret;
-import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServicePort;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
-import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
-import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRuleBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
-import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPort;
 import io.fabric8.kubernetes.api.model.policy.v1.PodDisruptionBudget;
-import io.strimzi.api.kafka.model.ContainerEnvVar;
-import io.strimzi.api.kafka.model.InlineLogging;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaClusterSpec;
 import io.strimzi.api.kafka.model.KafkaJmxAuthenticationPassword;
-import io.strimzi.api.kafka.model.StrimziPodSet;
 import io.strimzi.api.kafka.model.KafkaResources;
-import io.strimzi.api.kafka.model.Logging;
 import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.ProbeBuilder;
+import io.strimzi.api.kafka.model.StrimziPodSet;
 import io.strimzi.api.kafka.model.ZookeeperClusterSpec;
 import io.strimzi.api.kafka.model.status.Condition;
 import io.strimzi.api.kafka.model.storage.Storage;
+import io.strimzi.api.kafka.model.template.InternalServiceTemplate;
+import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
+import io.strimzi.api.kafka.model.template.PodTemplate;
+import io.strimzi.api.kafka.model.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.template.StatefulSetTemplate;
 import io.strimzi.api.kafka.model.template.ZookeeperClusterTemplate;
 import io.strimzi.certs.CertAndKey;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
 import io.strimzi.operator.cluster.model.securityprofiles.PodSecurityProviderContextImpl;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.MetricsAndLogging;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
@@ -59,19 +55,39 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
-public class ZookeeperCluster extends AbstractModel {
-    public static final String APPLICATION_NAME = "zookeeper";
+import static java.util.Collections.emptyMap;
 
+/**
+ * ZooKeeper cluster model
+ */
+@SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
+public class ZookeeperCluster extends AbstractStatefulModel {
+    /**
+     * Port for plaintext access for ZooKeeper clients (available inside the pod only)
+     */
     public static final int CLIENT_PLAINTEXT_PORT = 12181; // This port is internal only, not exposed => no need for name
+
+    /**
+     * TLS port for ZooKeeper clients
+     */
     public static final int CLIENT_TLS_PORT = 2181;
-    protected static final String CLIENT_TLS_PORT_NAME = "tcp-clients";
+
+    /**
+     * Port used for ZooKeeper clustering
+     */
     public static final int CLUSTERING_PORT = 2888;
-    protected static final String CLUSTERING_PORT_NAME = "tcp-clustering";
+
+    /**
+     * Port used for ZooKeeper leader election
+     */
     public static final int LEADER_ELECTION_PORT = 3888;
+
+    protected static final String COMPONENT_TYPE = "zookeeper";
+    protected static final String CLIENT_TLS_PORT_NAME = "tcp-clients";
+    protected static final String CLUSTERING_PORT_NAME = "tcp-clustering";
     protected static final String LEADER_ELECTION_PORT_NAME = "tcp-election";
 
-    public static final String ZOOKEEPER_NAME = "zookeeper";
+    protected static final String ZOOKEEPER_NAME = "zookeeper";
     protected static final String ZOOKEEPER_NODE_CERTIFICATES_VOLUME_NAME = "zookeeper-nodes";
     protected static final String ZOOKEEPER_NODE_CERTIFICATES_VOLUME_MOUNT = "/opt/kafka/zookeeper-node-certs/";
     protected static final String ZOOKEEPER_CLUSTER_CA_VOLUME_NAME = "cluster-ca-certs";
@@ -89,7 +105,7 @@ public class ZookeeperCluster extends AbstractModel {
     private boolean isJmxEnabled = false;
     private boolean isJmxAuthenticated = false;
 
-    public static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder()
+    private static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder()
             .withTimeoutSeconds(5)
             .withInitialDelaySeconds(15)
             .build();
@@ -97,18 +113,24 @@ public class ZookeeperCluster extends AbstractModel {
     private static final boolean DEFAULT_ZOOKEEPER_SNAPSHOT_CHECK_ENABLED = true;
 
     // Zookeeper configuration keys (EnvVariables)
-    public static final String ENV_VAR_ZOOKEEPER_METRICS_ENABLED = "ZOOKEEPER_METRICS_ENABLED";
-    public static final String ENV_VAR_ZOOKEEPER_CONFIGURATION = "ZOOKEEPER_CONFIGURATION";
-    public static final String ENV_VAR_ZOOKEEPER_SNAPSHOT_CHECK_ENABLED = "ZOOKEEPER_SNAPSHOT_CHECK_ENABLED";
+    protected static final String ENV_VAR_ZOOKEEPER_METRICS_ENABLED = "ZOOKEEPER_METRICS_ENABLED";
+    protected static final String ENV_VAR_ZOOKEEPER_CONFIGURATION = "ZOOKEEPER_CONFIGURATION";
+    private static final String ENV_VAR_ZOOKEEPER_SNAPSHOT_CHECK_ENABLED = "ZOOKEEPER_SNAPSHOT_CHECK_ENABLED";
 
     protected static final String CO_ENV_VAR_CUSTOM_ZOOKEEPER_POD_LABELS = "STRIMZI_CUSTOM_ZOOKEEPER_LABELS";
 
     // Config map keys
-    public static final String CONFIG_MAP_KEY_ZOOKEEPER_NODE_COUNT = "zookeeper.node-count";
+    private static final String CONFIG_MAP_KEY_ZOOKEEPER_NODE_COUNT = "zookeeper.node-count";
 
     // Templates
-    protected List<ContainerEnvVar> templateZookeeperContainerEnvVars;
-    protected SecurityContext templateZookeeperContainerSecurityContext;
+    private PodDisruptionBudgetTemplate templatePodDisruptionBudget;
+    private ResourceTemplate templatePersistentVolumeClaims;
+    private StatefulSetTemplate templateStatefulSet;
+    private ResourceTemplate templatePodSet;
+    private PodTemplate templatePod;
+    private ResourceTemplate templateJmxSecret;
+    private InternalServiceTemplate templateHeadlessService;
+    private InternalServiceTemplate templateService;
 
     private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
     static {
@@ -125,10 +147,8 @@ public class ZookeeperCluster extends AbstractModel {
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
     private ZookeeperCluster(Reconciliation reconciliation, HasMetadata resource) {
-        super(reconciliation, resource, APPLICATION_NAME);
-        this.name = KafkaResources.zookeeperStatefulSetName(cluster);
-        this.serviceName = KafkaResources.zookeeperServiceName(cluster);
-        this.headlessServiceName = KafkaResources.zookeeperHeadlessServiceName(cluster);
+        super(reconciliation, resource, KafkaResources.zookeeperStatefulSetName(resource.getMetadata().getName()), COMPONENT_TYPE);
+
         this.ancillaryConfigMapName = KafkaResources.zookeeperMetricsAndLogConfigMapName(cluster);
         this.image = null;
         this.replicas = ZookeeperClusterSpec.DEFAULT_REPLICAS;
@@ -145,14 +165,33 @@ public class ZookeeperCluster extends AbstractModel {
         this.logAndMetricsConfigMountPath = "/opt/kafka/custom-config/";
     }
 
+    /**
+     * Creates ZooKeeper cluster model from the Kafka CR
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param kafkaAssembly     The Kafka CR
+     * @param versions          Supported Kafka versions
+     *
+     * @return  New instance of the ZooKeeper cluster model
+     */
     public static ZookeeperCluster fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions) {
         return fromCrd(reconciliation, kafkaAssembly, versions, null, 0);
     }
 
+    /**
+     * Creates ZooKeeper cluster model from the Kafka CR
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param kafkaAssembly     The Kafka CR
+     * @param versions          Supported Kafka versions
+     * @param oldStorage        Old storage configuration (based on the actual Kubernetes cluster)
+     * @param oldReplicas       Current number of replicas (based on the actual Kubernetes cluster)
+     *
+     * @return  New instance of the ZooKeeper cluster model
+     */
     @SuppressWarnings({"checkstyle:MethodLength", "checkstyle:CyclomaticComplexity", "checkstyle:NPathComplexity"})
     public static ZookeeperCluster fromCrd(Reconciliation reconciliation, Kafka kafkaAssembly, KafkaVersion.Lookup versions, Storage oldStorage, int oldReplicas) {
         ZookeeperCluster zk = new ZookeeperCluster(reconciliation, kafkaAssembly);
-        zk.setOwnerReference(kafkaAssembly);
         ZookeeperClusterSpec zookeeperClusterSpec = kafkaAssembly.getSpec().getZookeeper();
 
         int replicas = zookeeperClusterSpec.getReplicas();
@@ -162,7 +201,9 @@ public class ZookeeperCluster extends AbstractModel {
         if (replicas == 1 && zookeeperClusterSpec.getStorage() != null && "ephemeral".equals(zookeeperClusterSpec.getStorage().getType())) {
             LOGGER.warnCr(reconciliation, "A ZooKeeper cluster with a single replica and ephemeral storage will be in a defective state after any restart or rolling update. It is recommended that a minimum of three replicas are used.");
         }
-        zk.setReplicas(replicas);
+        zk.replicas = replicas;
+
+        ModelUtils.validateComputeResources(zookeeperClusterSpec.getResources(), ".spec.zookeeper.resources");
 
         String image = zookeeperClusterSpec.getImage();
         if (image == null) {
@@ -170,25 +211,24 @@ public class ZookeeperCluster extends AbstractModel {
             image = versions.kafkaImage(kafkaClusterSpec != null ? kafkaClusterSpec.getImage() : null,
                     kafkaClusterSpec != null ? kafkaClusterSpec.getVersion() : null);
         }
-        zk.setImage(image);
+        zk.image = image;
 
         if (zookeeperClusterSpec.getReadinessProbe() != null) {
-            zk.setReadinessProbe(zookeeperClusterSpec.getReadinessProbe());
+            zk.readinessProbeOptions = zookeeperClusterSpec.getReadinessProbe();
         }
         if (zookeeperClusterSpec.getLivenessProbe() != null) {
-            zk.setLivenessProbe(zookeeperClusterSpec.getLivenessProbe());
+            zk.livenessProbeOptions = zookeeperClusterSpec.getLivenessProbe();
         }
 
-        Logging logging = zookeeperClusterSpec.getLogging();
-        zk.setLogging(logging == null ? new InlineLogging() : logging);
-        zk.setGcLoggingEnabled(zookeeperClusterSpec.getJvmOptions() == null ? DEFAULT_JVM_GC_LOGGING_ENABLED : zookeeperClusterSpec.getJvmOptions().isGcLoggingEnabled());
+        zk.logging = zookeeperClusterSpec.getLogging();
+        zk.gcLoggingEnabled = zookeeperClusterSpec.getJvmOptions() == null ? DEFAULT_JVM_GC_LOGGING_ENABLED : zookeeperClusterSpec.getJvmOptions().isGcLoggingEnabled();
 
         // Parse different types of metrics configurations
         ModelUtils.parseMetrics(zk, zookeeperClusterSpec);
 
         if (oldStorage != null) {
             Storage newStorage = zookeeperClusterSpec.getStorage();
-            AbstractModel.validatePersistentStorage(newStorage);
+            StorageUtils.validatePersistentStorage(newStorage);
 
             StorageDiff diff = new StorageDiff(reconciliation, oldStorage, newStorage, oldReplicas, zookeeperClusterSpec.getReplicas());
 
@@ -205,7 +245,7 @@ public class ZookeeperCluster extends AbstractModel {
                         "The desired ZooKeeper storage configuration contains changes which are not allowed. As a " +
                                 "result, all storage changes will be ignored. Use DEBUG level logging for more information " +
                                 "about the detected changes.");
-                zk.addWarningCondition(warning);
+                zk.warningConditions.add(warning);
 
                 zk.setStorage(oldStorage);
             } else {
@@ -217,9 +257,9 @@ public class ZookeeperCluster extends AbstractModel {
 
         zk.setConfiguration(new ZookeeperConfiguration(reconciliation, zookeeperClusterSpec.getConfig().entrySet()));
 
-        zk.setResources(zookeeperClusterSpec.getResources());
+        zk.resources = zookeeperClusterSpec.getResources();
 
-        zk.setJvmOptions(zookeeperClusterSpec.getJvmOptions());
+        zk.jvmOptions = zookeeperClusterSpec.getJvmOptions();
 
         if (zookeeperClusterSpec.getJmxOptions() != null) {
             zk.isJmxEnabled = true;
@@ -232,54 +272,17 @@ public class ZookeeperCluster extends AbstractModel {
         if (zookeeperClusterSpec.getTemplate() != null) {
             ZookeeperClusterTemplate template = zookeeperClusterSpec.getTemplate();
 
-            if (template.getStatefulset() != null) {
-                if (template.getStatefulset().getPodManagementPolicy() != null) {
-                    zk.templatePodManagementPolicy = template.getStatefulset().getPodManagementPolicy();
-                }
-
-                if (template.getStatefulset().getMetadata() != null) {
-                    zk.templateStatefulSetLabels = template.getStatefulset().getMetadata().getLabels();
-                    zk.templateStatefulSetAnnotations = template.getStatefulset().getMetadata().getAnnotations();
-                }
-            }
-
-            if (template.getPodSet() != null && template.getPodSet().getMetadata() != null) {
-                zk.templatePodSetLabels = template.getPodSet().getMetadata().getLabels();
-                zk.templatePodSetAnnotations = template.getPodSet().getMetadata().getAnnotations();
-            }
-
-            ModelUtils.parsePodTemplate(zk, template.getPod());
-            ModelUtils.parseInternalServiceTemplate(zk, template.getClientService());
-            ModelUtils.parseInternalHeadlessServiceTemplate(zk, template.getNodesService());
-
-            if (template.getPersistentVolumeClaim() != null && template.getPersistentVolumeClaim().getMetadata() != null) {
-                zk.templatePersistentVolumeClaimLabels = Util.mergeLabelsOrAnnotations(template.getPersistentVolumeClaim().getMetadata().getLabels(),
-                        zk.templateStatefulSetLabels);
-                zk.templatePersistentVolumeClaimAnnotations = template.getPersistentVolumeClaim().getMetadata().getAnnotations();
-            }
-
-            if (template.getZookeeperContainer() != null && template.getZookeeperContainer().getEnv() != null) {
-                zk.templateZookeeperContainerEnvVars = template.getZookeeperContainer().getEnv();
-            }
-
-            if (template.getZookeeperContainer() != null && template.getZookeeperContainer().getSecurityContext() != null) {
-                zk.templateZookeeperContainerSecurityContext = template.getZookeeperContainer().getSecurityContext();
-            }
-
-            if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
-                zk.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
-                zk.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
-            }
-
-            if (template.getJmxSecret() != null && template.getJmxSecret().getMetadata() != null) {
-                zk.templateJmxSecretLabels = template.getJmxSecret().getMetadata().getLabels();
-                zk.templateJmxSecretAnnotations = template.getJmxSecret().getMetadata().getAnnotations();
-            }
-
-            ModelUtils.parsePodDisruptionBudgetTemplate(zk, template.getPodDisruptionBudget());
+            zk.templatePodDisruptionBudget = template.getPodDisruptionBudget();
+            zk.templatePersistentVolumeClaims = template.getPersistentVolumeClaim();
+            zk.templateStatefulSet = template.getStatefulset();
+            zk.templatePodSet = template.getPodSet();
+            zk.templatePod = template.getPod();
+            zk.templateJmxSecret = template.getJmxSecret();
+            zk.templateService = template.getClientService();
+            zk.templateHeadlessService = template.getNodesService();
+            zk.templateServiceAccount = template.getServiceAccount();
+            zk.templateContainer = template.getZookeeperContainer();
         }
-
-        zk.templatePodLabels = Util.mergeLabelsOrAnnotations(zk.templatePodLabels, DEFAULT_POD_LABELS);
 
         // Should run at the end when everything is set
         ZooKeeperSpecChecker specChecker = new ZooKeeperSpecChecker(zk);
@@ -288,11 +291,18 @@ public class ZookeeperCluster extends AbstractModel {
         return zk;
     }
 
+    /**
+     * @return  Generates a ZooKeeper service
+     */
     public Service generateService() {
-        List<ServicePort> ports = new ArrayList<>(1);
-        ports.add(createServicePort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT, CLIENT_TLS_PORT, "TCP"));
-
-        return createService("ClusterIP", ports, templateServiceAnnotations);
+        return ServiceUtils.createClusterIpService(
+                KafkaResources.zookeeperServiceName(cluster),
+                namespace,
+                labels,
+                ownerReference,
+                templateService,
+                List.of(ServiceUtils.createServicePort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT, CLIENT_TLS_PORT, "TCP"))
+        );
     }
 
     /**
@@ -304,129 +314,90 @@ public class ZookeeperCluster extends AbstractModel {
      * @return The network policy.
      */
     public NetworkPolicy generateNetworkPolicy(String operatorNamespace, Labels operatorNamespaceLabels) {
-        List<NetworkPolicyIngressRule> rules = new ArrayList<>(2);
+        // Internal peers => Strimzi components which need access
+        NetworkPolicyPeer clusterOperatorPeer = NetworkPolicyUtils.createPeer(Map.of(Labels.STRIMZI_KIND_LABEL, "cluster-operator"), NetworkPolicyUtils.clusterOperatorNamespaceSelector(namespace, operatorNamespace, operatorNamespaceLabels));
+        NetworkPolicyPeer zookeeperClusterPeer = NetworkPolicyUtils.createPeer(labels.strimziSelectorLabels().toMap());
+        NetworkPolicyPeer kafkaClusterPeer = NetworkPolicyUtils.createPeer(Map.of(Labels.STRIMZI_NAME_LABEL, KafkaResources.kafkaStatefulSetName(cluster)));
+        NetworkPolicyPeer entityOperatorPeer = NetworkPolicyUtils.createPeer(Map.of(Labels.STRIMZI_NAME_LABEL, KafkaResources.entityOperatorDeploymentName(cluster)));
 
-        NetworkPolicyPort clientsPort = new NetworkPolicyPort();
-        clientsPort.setPort(new IntOrString(CLIENT_TLS_PORT));
-        clientsPort.setProtocol("TCP");
-
-        NetworkPolicyPort clusteringPort = new NetworkPolicyPort();
-        clusteringPort.setPort(new IntOrString(CLUSTERING_PORT));
-        clusteringPort.setProtocol("TCP");
-
-        NetworkPolicyPort leaderElectionPort = new NetworkPolicyPort();
-        leaderElectionPort.setPort(new IntOrString(LEADER_ELECTION_PORT));
-        leaderElectionPort.setProtocol("TCP");
-
-        NetworkPolicyPeer zookeeperClusterPeer = new NetworkPolicyPeer();
-        LabelSelector labelSelector2 = new LabelSelector();
-        Map<String, String> expressions2 = new HashMap<>(1);
-        expressions2.put(Labels.STRIMZI_NAME_LABEL, KafkaResources.zookeeperStatefulSetName(cluster));
-        labelSelector2.setMatchLabels(expressions2);
-        zookeeperClusterPeer.setPodSelector(labelSelector2);
+        // List of network policy rules for all ports
+        List<NetworkPolicyIngressRule> rules = new ArrayList<>();
 
         // Zookeeper only ports - 2888 & 3888 which need to be accessed by the Zookeeper cluster members only
-        NetworkPolicyIngressRule zookeeperClusteringIngressRule = new NetworkPolicyIngressRuleBuilder()
-                .withPorts(clusteringPort, leaderElectionPort)
-                .withFrom(zookeeperClusterPeer)
-                .build();
-
-        rules.add(zookeeperClusteringIngressRule);
+        rules.add(NetworkPolicyUtils.createIngressRule(CLUSTERING_PORT, List.of(zookeeperClusterPeer)));
+        rules.add(NetworkPolicyUtils.createIngressRule(LEADER_ELECTION_PORT, List.of(zookeeperClusterPeer)));
 
         // Clients port - needs to be access from outside the Zookeeper cluster as well
-        NetworkPolicyIngressRule clientsIngressRule = new NetworkPolicyIngressRuleBuilder()
-                .withPorts(clientsPort)
-                .withFrom()
-                .build();
+        rules.add(NetworkPolicyUtils.createIngressRule(CLIENT_TLS_PORT, List.of(kafkaClusterPeer, zookeeperClusterPeer, entityOperatorPeer, clusterOperatorPeer)));
 
-        NetworkPolicyPeer kafkaClusterPeer = new NetworkPolicyPeer();
-        LabelSelector labelSelector = new LabelSelector();
-        Map<String, String> expressions = new HashMap<>(1);
-        expressions.put(Labels.STRIMZI_NAME_LABEL, KafkaResources.kafkaStatefulSetName(cluster));
-        labelSelector.setMatchLabels(expressions);
-        kafkaClusterPeer.setPodSelector(labelSelector);
-
-        NetworkPolicyPeer entityOperatorPeer = new NetworkPolicyPeer();
-        LabelSelector labelSelector3 = new LabelSelector();
-        Map<String, String> expressions3 = new HashMap<>(1);
-        expressions3.put(Labels.STRIMZI_NAME_LABEL, KafkaResources.entityOperatorDeploymentName(cluster));
-        labelSelector3.setMatchLabels(expressions3);
-        entityOperatorPeer.setPodSelector(labelSelector3);
-
-        NetworkPolicyPeer clusterOperatorPeer = new NetworkPolicyPeer();
-        LabelSelector labelSelector4 = new LabelSelector();
-        Map<String, String> expressions4 = new HashMap<>(1);
-        expressions4.put(Labels.STRIMZI_KIND_LABEL, "cluster-operator");
-        labelSelector4.setMatchLabels(expressions4);
-        clusterOperatorPeer.setPodSelector(labelSelector4);
-        ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(clusterOperatorPeer, namespace, operatorNamespace, operatorNamespaceLabels);
-
-        // This is a hack because we have no guarantee that the CO namespace has some particular labels
-        List<NetworkPolicyPeer> clientsPortPeers = new ArrayList<>(4);
-        clientsPortPeers.add(kafkaClusterPeer);
-        clientsPortPeers.add(zookeeperClusterPeer);
-        clientsPortPeers.add(entityOperatorPeer);
-        clientsPortPeers.add(clusterOperatorPeer);
-        clientsIngressRule.setFrom(clientsPortPeers);
-
-        rules.add(clientsIngressRule);
-
+        // The Metrics port (if enabled) is opened to all by default
         if (isMetricsEnabled) {
-            NetworkPolicyIngressRule metricsRule = new NetworkPolicyIngressRuleBuilder()
-                    .addNewPort()
-                        .withNewPort(METRICS_PORT)
-                        .withProtocol("TCP")
-                    .endPort()
-                    .withFrom()
-                    .build();
-
-            rules.add(metricsRule);
+            rules.add(NetworkPolicyUtils.createIngressRule(METRICS_PORT, List.of()));
         }
 
+        // The JMX port (if enabled) is opened to all by default
         if (isJmxEnabled) {
-            NetworkPolicyPort jmxPort = new NetworkPolicyPort();
-            jmxPort.setPort(new IntOrString(JMX_PORT));
-
-            NetworkPolicyIngressRule jmxRule = new NetworkPolicyIngressRuleBuilder()
-                    .withPorts(jmxPort)
-                    .withFrom()
-                    .build();
-
-            rules.add(jmxRule);
+            rules.add(NetworkPolicyUtils.createIngressRule(JMX_PORT, List.of()));
         }
 
-        NetworkPolicy networkPolicy = new NetworkPolicyBuilder()
-                .withNewMetadata()
-                    .withName(KafkaResources.zookeeperNetworkPolicyName(cluster))
-                    .withNamespace(namespace)
-                    .withLabels(labels.toMap())
-                    .withOwnerReferences(createOwnerReference())
-                .endMetadata()
-                .withNewSpec()
-                    .withPodSelector(labelSelector2)
-                    .withIngress(rules)
-                .endSpec()
-                .build();
-
-        LOGGER.traceCr(reconciliation, "Created network policy {}", networkPolicy);
-        return networkPolicy;
+        // Build the final network policy with all rules covering all the ports
+        return NetworkPolicyUtils.createNetworkPolicy(
+                KafkaResources.zookeeperNetworkPolicyName(cluster),
+                namespace,
+                labels,
+                ownerReference,
+                rules
+        );
     }
 
+    /**
+     * @return  Generates the headless ZooKeeper service
+     */
     public Service generateHeadlessService() {
-        return createHeadlessService(getServicePortList());
+        return ServiceUtils.createHeadlessService(
+                KafkaResources.zookeeperHeadlessServiceName(cluster),
+                namespace,
+                labels,
+                ownerReference,
+                templateHeadlessService,
+                getServicePortList()
+        );
     }
 
+    /**
+     * Generates ZooKeeper StatefulSet
+     *
+     * @param isOpenShift       Flag indicating if we are on OpenShift or not
+     * @param imagePullPolicy   Image pull policy
+     * @param imagePullSecrets  List of image pull secrets
+     *
+     * @return  Generated StatefulSet
+     */
     public StatefulSet generateStatefulSet(boolean isOpenShift, ImagePullPolicy imagePullPolicy, List<LocalObjectReference> imagePullSecrets) {
-        return createStatefulSet(
-                Collections.singletonMap(ANNO_STRIMZI_IO_STORAGE, ModelUtils.encodeStorageToJson(storage)),
-                Collections.emptyMap(),
-                getStatefulSetVolumes(isOpenShift),
+        return WorkloadUtils.createStatefulSet(
+                componentName,
+                namespace,
+                labels,
+                ownerReference,
+                templateStatefulSet,
+                replicas,
+                KafkaResources.zookeeperHeadlessServiceName(cluster),
+                Map.of(Annotations.ANNO_STRIMZI_IO_STORAGE, ModelUtils.encodeStorageToJson(storage)),
                 getPersistentVolumeClaimTemplates(),
-                getMergedAffinity(),
-                getInitContainers(imagePullPolicy),
-                getContainers(imagePullPolicy),
-                imagePullSecrets,
-                securityProvider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(storage, templateSecurityContext)));
+                WorkloadUtils.createPodTemplateSpec(
+                        componentName,
+                        labels,
+                        templatePod,
+                        DEFAULT_POD_LABELS,
+                        Map.of(),
+                        templatePod != null ? templatePod.getAffinity() : null,
+                        null,
+                        List.of(createContainer(imagePullPolicy)),
+                        getStatefulSetVolumes(isOpenShift),
+                        imagePullSecrets,
+                        securityProvider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(storage, templatePod))
+                )
+        );
     }
 
     /**
@@ -447,16 +418,33 @@ public class ZookeeperCluster extends AbstractModel {
                                         ImagePullPolicy imagePullPolicy,
                                         List<LocalObjectReference> imagePullSecrets,
                                         Map<String, String> podAnnotations) {
-        return createPodSet(
-            replicas,
-            Collections.singletonMap(ANNO_STRIMZI_IO_STORAGE, ModelUtils.encodeStorageToJson(storage)),
-            (brokerId) -> podAnnotations,
-            podName -> getPodSetVolumes(podName, isOpenShift),
-            getMergedAffinity(),
-            getInitContainers(imagePullPolicy),
-            getContainers(imagePullPolicy),
-            imagePullSecrets,
-            securityProvider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(storage, templateSecurityContext)));
+        return WorkloadUtils.createPodSet(
+                componentName,
+                namespace,
+                labels,
+                ownerReference,
+                templatePodSet,
+                replicas,
+                Map.of(Annotations.ANNO_STRIMZI_IO_STORAGE, ModelUtils.encodeStorageToJson(storage)),
+                brokerId -> WorkloadUtils.createStatefulPod(
+                        reconciliation,
+                        getPodName(brokerId),
+                        namespace,
+                        labels,
+                        componentName,
+                        componentName,
+                        templatePod,
+                        DEFAULT_POD_LABELS,
+                        podAnnotations,
+                        KafkaResources.zookeeperHeadlessServiceName(cluster),
+                        templatePod != null ? templatePod.getAffinity() : null,
+                        null,
+                        List.of(createContainer(imagePullPolicy)),
+                        getPodSetVolumes(getPodName(brokerId), isOpenShift),
+                        imagePullSecrets,
+                        securityProvider.zooKeeperPodSecurityContext(new PodSecurityProviderContextImpl(storage, templatePod))
+                )
+        );
     }
 
     /**
@@ -487,70 +475,68 @@ public class ZookeeperCluster extends AbstractModel {
             secretData.put(KafkaResources.zookeeperPodName(cluster, i) + ".password", cert.storePasswordAsBase64String());
         }
 
-        return createSecret(KafkaResources.zookeeperSecretName(cluster), secretData,
-                Collections.singletonMap(clusterCa.caCertGenerationAnnotation(), String.valueOf(clusterCa.certGeneration())));
+        return ModelUtils.createSecret(
+                KafkaResources.zookeeperSecretName(cluster),
+                namespace,
+                labels,
+                ownerReference,
+                secretData,
+                Map.of(clusterCa.caCertGenerationAnnotation(), String.valueOf(clusterCa.certGeneration())),
+                emptyMap()
+        );
     }
 
-    @Override
-    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
-
-        List<Container> containers = new ArrayList<>(1);
-
-        Container container = new ContainerBuilder()
-                .withName(ZOOKEEPER_NAME)
-                .withImage(getImage())
-                .withCommand("/opt/kafka/zookeeper_run.sh")
-                .withEnv(getEnvVars())
-                .withVolumeMounts(getVolumeMounts())
-                .withPorts(getContainerPortList())
-                .withLivenessProbe(ProbeGenerator.execProbe(livenessProbeOptions, Collections.singletonList(livenessPath)))
-                .withReadinessProbe(ProbeGenerator.execProbe(readinessProbeOptions, Collections.singletonList(readinessPath)))
-                .withResources(getResources())
-                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(securityProvider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(storage, templateZookeeperContainerSecurityContext)))
-                .build();
-
-        containers.add(container);
-
-        return containers;
+    /* test */ Container createContainer(ImagePullPolicy imagePullPolicy) {
+        return ContainerUtils.createContainer(
+                ZOOKEEPER_NAME,
+                image,
+                List.of("/opt/kafka/zookeeper_run.sh"),
+                securityProvider.zooKeeperContainerSecurityContext(new ContainerSecurityProviderContextImpl(storage, templateContainer)),
+                resources,
+                getEnvVars(),
+                getContainerPortList(),
+                getVolumeMounts(),
+                ProbeGenerator.execProbe(livenessProbeOptions, Collections.singletonList(livenessPath)),
+                ProbeGenerator.execProbe(readinessProbeOptions, Collections.singletonList(readinessPath)),
+                imagePullPolicy
+        );
     }
 
-    @Override
     protected List<EnvVar> getEnvVars() {
         List<EnvVar> varList = new ArrayList<>();
-        varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_METRICS_ENABLED, String.valueOf(isMetricsEnabled)));
-        varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_SNAPSHOT_CHECK_ENABLED, String.valueOf(isSnapshotCheckEnabled)));
-        varList.add(buildEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_ZOOKEEPER_METRICS_ENABLED, String.valueOf(isMetricsEnabled)));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_ZOOKEEPER_SNAPSHOT_CHECK_ENABLED, String.valueOf(isSnapshotCheckEnabled)));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
 
         if (isJmxEnabled) {
-            varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_JMX_ENABLED, "true"));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_ZOOKEEPER_JMX_ENABLED, "true"));
             if (isJmxAuthenticated) {
-                varList.add(buildEnvVarFromSecret(ENV_VAR_ZOOKEEPER_JMX_USERNAME, KafkaResources.zookeeperJmxSecretName(cluster), SECRET_JMX_USERNAME_KEY));
-                varList.add(buildEnvVarFromSecret(ENV_VAR_ZOOKEEPER_JMX_PASSWORD, KafkaResources.zookeeperJmxSecretName(cluster), SECRET_JMX_PASSWORD_KEY));
+                varList.add(ContainerUtils.createEnvVarFromSecret(ENV_VAR_ZOOKEEPER_JMX_USERNAME, KafkaResources.zookeeperJmxSecretName(cluster), SECRET_JMX_USERNAME_KEY));
+                varList.add(ContainerUtils.createEnvVarFromSecret(ENV_VAR_ZOOKEEPER_JMX_PASSWORD, KafkaResources.zookeeperJmxSecretName(cluster), SECRET_JMX_PASSWORD_KEY));
             }
         }
 
-        ModelUtils.heapOptions(varList, 75, 2L * 1024L * 1024L * 1024L, getJvmOptions(), getResources());
-        ModelUtils.jvmPerformanceOptions(varList, getJvmOptions());
-        ModelUtils.jvmSystemProperties(varList, getJvmOptions());
-        varList.add(buildEnvVar(ENV_VAR_ZOOKEEPER_CONFIGURATION, configuration.getConfiguration()));
+        ModelUtils.heapOptions(varList, 75, 2L * 1024L * 1024L * 1024L, jvmOptions, resources);
+        ModelUtils.jvmPerformanceOptions(varList, jvmOptions);
+        ModelUtils.jvmSystemProperties(varList, jvmOptions);
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_ZOOKEEPER_CONFIGURATION, configuration.getConfiguration()));
 
         // Add shared environment variables used for all containers
-        varList.addAll(getRequiredEnvVars());
+        varList.addAll(ContainerUtils.requiredEnvVars());
 
-        addContainerEnvsToExistingEnvs(varList, templateZookeeperContainerEnvVars);
+        ContainerUtils.addContainerEnvsToExistingEnvs(reconciliation, varList, templateContainer);
 
         return varList;
     }
 
     private List<ServicePort> getServicePortList() {
         List<ServicePort> portList = new ArrayList<>(4);
-        portList.add(createServicePort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT, CLIENT_TLS_PORT, "TCP"));
-        portList.add(createServicePort(CLUSTERING_PORT_NAME, CLUSTERING_PORT, CLUSTERING_PORT, "TCP"));
-        portList.add(createServicePort(LEADER_ELECTION_PORT_NAME, LEADER_ELECTION_PORT, LEADER_ELECTION_PORT, "TCP"));
+        portList.add(ServiceUtils.createServicePort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT, CLIENT_TLS_PORT, "TCP"));
+        portList.add(ServiceUtils.createServicePort(CLUSTERING_PORT_NAME, CLUSTERING_PORT, CLUSTERING_PORT, "TCP"));
+        portList.add(ServiceUtils.createServicePort(LEADER_ELECTION_PORT_NAME, LEADER_ELECTION_PORT, LEADER_ELECTION_PORT, "TCP"));
 
         if (isJmxEnabled) {
-            portList.add(createServicePort(JMX_PORT_NAME, JMX_PORT, JMX_PORT, "TCP"));
+            portList.add(ServiceUtils.createServicePort(JMX_PORT_NAME, JMX_PORT, JMX_PORT, "TCP"));
         }
 
         return portList;
@@ -559,12 +545,16 @@ public class ZookeeperCluster extends AbstractModel {
     private List<ContainerPort> getContainerPortList() {
         List<ContainerPort> portList = new ArrayList<>(4);
 
-        portList.add(createContainerPort(CLUSTERING_PORT_NAME, CLUSTERING_PORT, "TCP"));
-        portList.add(createContainerPort(LEADER_ELECTION_PORT_NAME, LEADER_ELECTION_PORT, "TCP"));
-        portList.add(createContainerPort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT, "TCP"));
+        portList.add(ContainerUtils.createContainerPort(CLUSTERING_PORT_NAME, CLUSTERING_PORT));
+        portList.add(ContainerUtils.createContainerPort(LEADER_ELECTION_PORT_NAME, LEADER_ELECTION_PORT));
+        portList.add(ContainerUtils.createContainerPort(CLIENT_TLS_PORT_NAME, CLIENT_TLS_PORT));
 
         if (isMetricsEnabled) {
-            portList.add(createContainerPort(METRICS_PORT_NAME, METRICS_PORT, "TCP"));
+            portList.add(ContainerUtils.createContainerPort(METRICS_PORT_NAME, METRICS_PORT));
+        }
+
+        if (isJmxEnabled) {
+            portList.add(ContainerUtils.createContainerPort(JMX_PORT_NAME, JMX_PORT));
         }
 
         return portList;
@@ -581,7 +571,7 @@ public class ZookeeperCluster extends AbstractModel {
     private List<Volume> getNonDataVolumes(boolean isOpenShift) {
         List<Volume> volumeList = new ArrayList<>(4);
 
-        volumeList.add(createTempDirVolume());
+        volumeList.add(VolumeUtils.createTempDirVolume(templatePod));
         volumeList.add(VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
         volumeList.add(VolumeUtils.createSecretVolume(ZOOKEEPER_NODE_CERTIFICATES_VOLUME_NAME, KafkaResources.zookeeperSecretName(cluster), isOpenShift));
         volumeList.add(VolumeUtils.createSecretVolume(ZOOKEEPER_CLUSTER_CA_VOLUME_NAME, AbstractModel.clusterCaCertSecretName(cluster), isOpenShift));
@@ -633,14 +623,18 @@ public class ZookeeperCluster extends AbstractModel {
         return VolumeUtils.createPersistentVolumeClaimTemplates(storage, false);
     }
 
+    /**
+     * @return  Generates list of ZooKeeper PVCs
+     */
     public List<PersistentVolumeClaim> generatePersistentVolumeClaims() {
-        return createPersistentVolumeClaims(storage, false);
+        return PersistentVolumeClaimUtils
+                .createPersistentVolumeClaims(componentName, namespace, replicas, storage, false, labels, ownerReference, templatePersistentVolumeClaims, templateStatefulSet);
     }
 
     private List<VolumeMount> getVolumeMounts() {
         List<VolumeMount> volumeMountList = new ArrayList<>(5);
 
-        volumeMountList.add(createTempDirVolumeMount());
+        volumeMountList.add(VolumeUtils.createTempDirVolumeMount());
         // ZooKeeper uses mount path which is different from the one used by Kafka.
         // As a result it cannot use VolumeUtils.getVolumeMounts and creates the volume mount directly
         volumeMountList.add(VolumeUtils.createVolumeMount(VOLUME_NAME, mountPath));
@@ -654,58 +648,33 @@ public class ZookeeperCluster extends AbstractModel {
     /**
      * Generates the PodDisruptionBudget.
      *
-     * @return The PodDisruptionBudget.
-     */
-    public PodDisruptionBudget generatePodDisruptionBudget() {
-        return createPodDisruptionBudget();
-    }
-
-    /**
-     * Generates the PodDisruptionBudgetV1Beta1.
-     *
-     * @return The PodDisruptionBudgetV1Beta1.
-     */
-    public io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget generatePodDisruptionBudgetV1Beta1() {
-        return createPodDisruptionBudgetV1Beta1();
-    }
-
-    /**
-     * Generates the PodDisruptionBudget for operator managed pods.
+     * @param customController  Identifies whether the PDB should be generated for a custom controller (StrimziPodSets)
+     *                          or not (Deployments, StatefulSet)
      *
      * @return The PodDisruptionBudget.
      */
-    public PodDisruptionBudget generateCustomControllerPodDisruptionBudget() {
-        return createCustomControllerPodDisruptionBudget();
+    public PodDisruptionBudget generatePodDisruptionBudget(boolean customController) {
+        if (customController) {
+            return PodDisruptionBudgetUtils.createCustomControllerPodDisruptionBudget(componentName, namespace, labels, ownerReference, templatePodDisruptionBudget, replicas);
+        } else {
+            return PodDisruptionBudgetUtils.createPodDisruptionBudget(componentName, namespace, labels, ownerReference, templatePodDisruptionBudget);
+        }
     }
 
     /**
-     * Generates the PodDisruptionBudget V1Beta1 for operator managed pods.
+     * Generates the PodDisruptionBudget V1Beta1.
      *
-     * @return The PodDisruptionBudget v1beta1.
-     */
-    public io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget generateCustomControllerPodDisruptionBudgetV1Beta1() {
-        return createCustomControllerPodDisruptionBudgetV1Beta1();
-    }
-
-    @Override
-    protected String getDefaultLogConfigFileName() {
-        return "zookeeperDefaultLoggingProperties";
-    }
-
-    /**
-     * Sets the image used for ZooKeeper. This method is called from outside the ZooKeeper model. It overrides the
-     * method from the super class to make it public.
+     * @param customController  Identifies whether the PDB should be generated for a custom controller (StrimziPodSets)
+     *                          or not (Deployments, StatefulSet)
      *
-     * @param image Image which should be used by ZooKeeper cluster
+     * @return The PodDisruptionBudget V1Beta1.
      */
-    @Override
-    public void setImage(String image) {
-        super.setImage(image);
-    }
-
-    @Override
-    public String getServiceAccountName() {
-        return KafkaResources.zookeeperStatefulSetName(cluster);
+    public io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget generatePodDisruptionBudgetV1Beta1(boolean customController) {
+        if (customController) {
+            return PodDisruptionBudgetUtils.createCustomControllerPodDisruptionBudgetV1Beta1(componentName, namespace, labels, ownerReference, templatePodDisruptionBudget, replicas);
+        } else {
+            return PodDisruptionBudgetUtils.createPodDisruptionBudgetV1Beta1(componentName, namespace, labels, ownerReference, templatePodDisruptionBudget);
+        }
     }
 
     /**
@@ -741,7 +710,15 @@ public class ZookeeperCluster extends AbstractModel {
                 data.put(SECRET_JMX_PASSWORD_KEY, Util.encodeToBase64(passwordGenerator.generate()));
             }
 
-            return createJmxSecret(KafkaResources.zookeeperJmxSecretName(cluster), data);
+            return ModelUtils.createSecret(
+                    KafkaResources.zookeeperJmxSecretName(cluster),
+                    namespace,
+                    labels,
+                    ownerReference,
+                    data,
+                    TemplateUtils.annotations(templateJmxSecret),
+                    TemplateUtils.labels(templateJmxSecret)
+            );
         } else {
             return null;
         }

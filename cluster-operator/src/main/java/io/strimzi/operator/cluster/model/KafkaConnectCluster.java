@@ -6,9 +6,9 @@ package io.strimzi.operator.cluster.model;
 
 import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.ConfigMapVolumeSource;
 import io.fabric8.kubernetes.api.model.Container;
-import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.ContainerPort;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.EnvVarBuilder;
@@ -16,31 +16,26 @@ import io.fabric8.kubernetes.api.model.EnvVarSource;
 import io.fabric8.kubernetes.api.model.EnvVarSourceBuilder;
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
+import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.SecretVolumeSource;
-import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.ServicePort;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeBuilder;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.VolumeMountBuilder;
-import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
-import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
-import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRuleBuilder;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
-import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeerBuilder;
 import io.fabric8.kubernetes.api.model.policy.v1.PodDisruptionBudget;
 import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.api.model.rbac.RoleRef;
 import io.fabric8.kubernetes.api.model.rbac.RoleRefBuilder;
 import io.fabric8.kubernetes.api.model.rbac.Subject;
 import io.fabric8.kubernetes.api.model.rbac.SubjectBuilder;
-import io.strimzi.api.kafka.model.ClientTls;
 import io.strimzi.api.kafka.model.CertSecretSource;
-import io.strimzi.api.kafka.model.ContainerEnvVar;
+import io.strimzi.api.kafka.model.ClientTls;
 import io.strimzi.api.kafka.model.KafkaConnect;
 import io.strimzi.api.kafka.model.KafkaConnectResources;
 import io.strimzi.api.kafka.model.KafkaConnectSpec;
@@ -52,7 +47,15 @@ import io.strimzi.api.kafka.model.connect.ExternalConfiguration;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationEnv;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationEnvVarSource;
 import io.strimzi.api.kafka.model.connect.ExternalConfigurationVolumeSource;
+import io.strimzi.api.kafka.model.template.ContainerTemplate;
+import io.strimzi.api.kafka.model.template.DeploymentTemplate;
+import io.strimzi.api.kafka.model.template.InternalServiceTemplate;
 import io.strimzi.api.kafka.model.template.KafkaConnectTemplate;
+import io.strimzi.api.kafka.model.template.PodDisruptionBudgetTemplate;
+import io.strimzi.api.kafka.model.template.PodTemplate;
+import io.strimzi.api.kafka.model.template.ResourceTemplate;
+import io.strimzi.api.kafka.model.tracing.JaegerTracing;
+import io.strimzi.api.kafka.model.tracing.OpenTelemetryTracing;
 import io.strimzi.api.kafka.model.tracing.Tracing;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.model.securityprofiles.ContainerSecurityProviderContextImpl;
@@ -61,43 +64,47 @@ import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
+import io.strimzi.operator.common.model.OrderedProperties;
 
 import java.nio.charset.StandardCharsets;
-
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.HashMap;
-import java.util.Base64;
 
+import static io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE;
 
+/**
+ * Kafka Connect model class
+ */
 @SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
 public class KafkaConnectCluster extends AbstractModel {
-    protected static final String APPLICATION_NAME = "kafka-connect";
-
-    // Port configuration
+    /**
+     * Port of the Kafka Connect REST API
+     */
     public static final int REST_API_PORT = 8083;
-    protected static final String REST_API_PORT_NAME = "rest-api";
 
+    protected static final String COMPONENT_TYPE = "kafka-connect";
+    protected static final String REST_API_PORT_NAME = "rest-api";
     protected static final String TLS_CERTS_BASE_VOLUME_MOUNT = "/opt/kafka/connect-certs/";
     protected static final String PASSWORD_VOLUME_MOUNT = "/opt/kafka/connect-password/";
     protected static final String EXTERNAL_CONFIGURATION_VOLUME_MOUNT_BASE_PATH = "/opt/kafka/external-configuration/";
     protected static final String EXTERNAL_CONFIGURATION_VOLUME_NAME_PREFIX = "ext-conf-";
 
     // Configuration defaults
-    protected static final int DEFAULT_REPLICAS = 3;
-    static final int DEFAULT_HEALTHCHECK_DELAY = 60;
-    static final int DEFAULT_HEALTHCHECK_TIMEOUT = 5;
-    public static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder().withInitialDelaySeconds(DEFAULT_HEALTHCHECK_TIMEOUT)
+    /* test */ static final int DEFAULT_REPLICAS = 3;
+    /* test */ static final int DEFAULT_HEALTHCHECK_DELAY = 60;
+    /* test */ static final int DEFAULT_HEALTHCHECK_TIMEOUT = 5;
+    private static final Probe DEFAULT_HEALTHCHECK_OPTIONS = new ProbeBuilder().withInitialDelaySeconds(DEFAULT_HEALTHCHECK_TIMEOUT)
             .withInitialDelaySeconds(DEFAULT_HEALTHCHECK_DELAY).build();
-    protected static final boolean DEFAULT_KAFKA_CONNECT_METRICS_ENABLED = false;
+    private static final boolean DEFAULT_KAFKA_CONNECT_METRICS_ENABLED = false;
 
-    private static final String NAME_SUFFIX = "-" + APPLICATION_NAME;
-    protected static final String KAFKA_CONNECT_JMX_SECRET_SUFFIX = NAME_SUFFIX + "-jmx";
-    protected static final String SECRET_JMX_USERNAME_KEY = "jmx-username";
-    protected static final String SECRET_JMX_PASSWORD_KEY = "jmx-password";
-
+    private static final String NAME_SUFFIX = "-" + COMPONENT_TYPE;
+    private static final String KAFKA_CONNECT_JMX_SECRET_SUFFIX = NAME_SUFFIX + "-jmx";
+    private static final String SECRET_JMX_USERNAME_KEY = "jmx-username";
+    private static final String SECRET_JMX_PASSWORD_KEY = "jmx-password";
 
     // Kafka Connect configuration keys (EnvVariables)
     protected static final String ENV_VAR_PREFIX = "KAFKA_CONNECT_";
@@ -115,6 +122,7 @@ public class KafkaConnectCluster extends AbstractModel {
     protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_CLIENT_SECRET = "KAFKA_CONNECT_OAUTH_CLIENT_SECRET";
     protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_ACCESS_TOKEN = "KAFKA_CONNECT_OAUTH_ACCESS_TOKEN";
     protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_REFRESH_TOKEN = "KAFKA_CONNECT_OAUTH_REFRESH_TOKEN";
+    protected static final String ENV_VAR_KAFKA_CONNECT_OAUTH_PASSWORD_GRANT_PASSWORD = "KAFKA_CONNECT_OAUTH_PASSWORD_GRANT_PASSWORD";
     protected static final String OAUTH_TLS_CERTS_BASE_VOLUME_MOUNT = "/opt/kafka/oauth-certs/";
     protected static final String ENV_VAR_STRIMZI_TRACING = "STRIMZI_TRACING";
     protected static final String ENV_VAR_KAFKA_CONNECT_JMX_ENABLED = "KAFKA_CONNECT_JMX_ENABLED";
@@ -125,14 +133,11 @@ public class KafkaConnectCluster extends AbstractModel {
 
     private Rack rack;
     private String initImage;
+    protected String serviceName;
 
     protected String bootstrapServers;
     protected List<ExternalConfigurationEnv> externalEnvs = Collections.emptyList();
     protected List<ExternalConfigurationVolumeSource> externalVolumes = Collections.emptyList();
-    protected List<ContainerEnvVar> templateContainerEnvVars;
-    protected List<ContainerEnvVar> templateInitContainerEnvVars;
-    protected SecurityContext templateContainerSecurityContext;
-    protected SecurityContext templateInitContainerSecurityContext;
     protected Tracing tracing;
 
     private ClientTls tls;
@@ -140,6 +145,16 @@ public class KafkaConnectCluster extends AbstractModel {
 
     private boolean isJmxEnabled;
     private boolean isJmxAuthenticated;
+
+    // Templates
+    protected PodDisruptionBudgetTemplate templatePodDisruptionBudget;
+    protected ResourceTemplate templateInitClusterRoleBinding;
+    protected DeploymentTemplate templateDeployment;
+    protected PodTemplate templatePod;
+    protected ResourceTemplate templateJmxSecret;
+    protected InternalServiceTemplate templateService;
+    protected ContainerTemplate templateInitContainer;
+
 
     private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
     static {
@@ -156,7 +171,7 @@ public class KafkaConnectCluster extends AbstractModel {
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
     protected KafkaConnectCluster(Reconciliation reconciliation, HasMetadata resource) {
-        this(reconciliation, resource, APPLICATION_NAME);
+        this(reconciliation, resource, KafkaConnectResources.deploymentName(resource.getMetadata().getName()), COMPONENT_TYPE);
     }
 
     /**
@@ -164,11 +179,12 @@ public class KafkaConnectCluster extends AbstractModel {
      *
      * @param reconciliation The reconciliation
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
-     * @param applicationName configurable allow other classes to extend this class
+     *                 @param name              Name of the Strimzi component usually consisting from the cluster name and component type
+     * @param componentType configurable allow other classes to extend this class
      */
-    protected KafkaConnectCluster(Reconciliation reconciliation, HasMetadata resource, String applicationName) {
-        super(reconciliation, resource, applicationName);
-        this.name = KafkaConnectResources.deploymentName(cluster);
+    protected KafkaConnectCluster(Reconciliation reconciliation, HasMetadata resource, String name, String componentType) {
+        super(reconciliation, resource, name, componentType);
+
         this.serviceName = KafkaConnectResources.serviceName(cluster);
         this.ancillaryConfigMapName = KafkaConnectResources.metricsAndLogConfigMapName(cluster);
         this.replicas = DEFAULT_REPLICAS;
@@ -183,11 +199,18 @@ public class KafkaConnectCluster extends AbstractModel {
         this.logAndMetricsConfigMountPath = "/opt/kafka/custom-config/";
     }
 
+    /**
+     * Creates the Kafka Connect model instance from the Kafka Connect CRD
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param kafkaConnect      Kafka connect custom resource
+     * @param versions          Supported Kafka versions
+     *
+     * @return  Instance of the Kafka Connect model class
+     */
     public static KafkaConnectCluster fromCrd(Reconciliation reconciliation, KafkaConnect kafkaConnect, KafkaVersion.Lookup versions) {
         KafkaConnectCluster cluster = fromSpec(reconciliation, kafkaConnect.getSpec(), versions,
                 new KafkaConnectCluster(reconciliation, kafkaConnect));
-
-        cluster.setOwnerReference(kafkaConnect);
 
         return cluster;
     }
@@ -196,13 +219,20 @@ public class KafkaConnectCluster extends AbstractModel {
      * Abstracts the calling of setters on a (subclass of) KafkaConnectCluster
      * from the instantiation of the (subclass of) KafkaConnectCluster,
      * thus permitting reuse of the setter-calling code for subclasses.
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param spec              Spec section of the Kafka Connect resource
+     * @param versions          Supported Kafka versions
+     * @param kafkaConnect      Kafka Connect resource
+     *
+     * @param <C>   Type of the Kafka Connect cluster
      */
-    @SuppressWarnings({"checkstyle:CyclomaticComplexity", "checkstyle:NPathComplexity"})
+    @SuppressWarnings({"checkstyle:CyclomaticComplexity", "checkstyle:NPathComplexity", "deprecation"})
     protected static <C extends KafkaConnectCluster> C fromSpec(Reconciliation reconciliation,
                                                                 KafkaConnectSpec spec,
                                                                 KafkaVersion.Lookup versions,
                                                                 C kafkaConnect) {
-        kafkaConnect.setReplicas(spec.getReplicas() != null && spec.getReplicas() >= 0 ? spec.getReplicas() : DEFAULT_REPLICAS);
+        kafkaConnect.replicas = spec.getReplicas() != null && spec.getReplicas() >= 0 ? spec.getReplicas() : DEFAULT_REPLICAS;
         kafkaConnect.tracing = spec.getTracing();
 
         AbstractConfiguration config = kafkaConnect.getConfiguration();
@@ -211,19 +241,24 @@ public class KafkaConnectCluster extends AbstractModel {
             kafkaConnect.setConfiguration(config);
         }
         if (kafkaConnect.tracing != null)   {
-            config.setConfigOption("consumer.interceptor.classes", "io.opentracing.contrib.kafka.TracingConsumerInterceptor");
-            config.setConfigOption("producer.interceptor.classes", "io.opentracing.contrib.kafka.TracingProducerInterceptor");
+            if (JaegerTracing.TYPE_JAEGER.equals(kafkaConnect.tracing.getType())) {
+                config.setConfigOption("consumer.interceptor.classes", JaegerTracing.CONSUMER_INTERCEPTOR_CLASS_NAME);
+                config.setConfigOption("producer.interceptor.classes", JaegerTracing.PRODUCER_INTERCEPTOR_CLASS_NAME);
+            } else if (OpenTelemetryTracing.TYPE_OPENTELEMETRY.equals(kafkaConnect.tracing.getType())) {
+                config.setConfigOption("consumer.interceptor.classes", OpenTelemetryTracing.CONSUMER_INTERCEPTOR_CLASS_NAME);
+                config.setConfigOption("producer.interceptor.classes", OpenTelemetryTracing.PRODUCER_INTERCEPTOR_CLASS_NAME);
+            }
         }
 
         if (kafkaConnect.getImage() == null) {
-            kafkaConnect.setImage(versions.kafkaConnectVersion(spec.getImage(), spec.getVersion()));
+            kafkaConnect.image = versions.kafkaConnectVersion(spec.getImage(), spec.getVersion());
         }
 
-        kafkaConnect.setResources(spec.getResources());
-        kafkaConnect.setLogging(spec.getLogging());
-        kafkaConnect.setGcLoggingEnabled(spec.getJvmOptions() == null ? DEFAULT_JVM_GC_LOGGING_ENABLED : spec.getJvmOptions().isGcLoggingEnabled());
+        kafkaConnect.resources = spec.getResources();
+        kafkaConnect.logging = spec.getLogging();
+        kafkaConnect.gcLoggingEnabled = spec.getJvmOptions() == null ? DEFAULT_JVM_GC_LOGGING_ENABLED : spec.getJvmOptions().isGcLoggingEnabled();
 
-        kafkaConnect.setJvmOptions(spec.getJvmOptions());
+        kafkaConnect.jvmOptions = spec.getJvmOptions();
 
         if (spec.getJmxOptions() != null) {
             kafkaConnect.setJmxEnabled(Boolean.TRUE);
@@ -231,10 +266,10 @@ public class KafkaConnectCluster extends AbstractModel {
         }
 
         if (spec.getReadinessProbe() != null) {
-            kafkaConnect.setReadinessProbe(spec.getReadinessProbe());
+            kafkaConnect.readinessProbeOptions = spec.getReadinessProbe();
         }
         if (spec.getLivenessProbe() != null) {
-            kafkaConnect.setLivenessProbe(spec.getLivenessProbe());
+            kafkaConnect.livenessProbeOptions = spec.getLivenessProbe();
         }
 
         kafkaConnect.setRack(spec.getRack());
@@ -260,42 +295,15 @@ public class KafkaConnectCluster extends AbstractModel {
         if (spec.getTemplate() != null) {
             KafkaConnectTemplate template = spec.getTemplate();
 
-            ModelUtils.parseDeploymentTemplate(kafkaConnect, template.getDeployment());
-            ModelUtils.parsePodTemplate(kafkaConnect, template.getPod());
-            ModelUtils.parseInternalServiceTemplate(kafkaConnect, template.getApiService());
-
-            if (template.getClusterRoleBinding() != null && template.getClusterRoleBinding().getMetadata() != null) {
-                kafkaConnect.templateClusterRoleBindingLabels = template.getClusterRoleBinding().getMetadata().getLabels();
-                kafkaConnect.templateClusterRoleBindingAnnotations = template.getClusterRoleBinding().getMetadata().getAnnotations();
-            }
-
-            if (template.getConnectContainer() != null && template.getConnectContainer().getEnv() != null) {
-                kafkaConnect.templateContainerEnvVars = template.getConnectContainer().getEnv();
-            }
-
-            if (template.getInitContainer() != null && template.getInitContainer().getEnv() != null) {
-                kafkaConnect.templateInitContainerEnvVars = template.getInitContainer().getEnv();
-            }
-
-            if (template.getConnectContainer() != null && template.getConnectContainer().getSecurityContext() != null) {
-                kafkaConnect.templateContainerSecurityContext = template.getConnectContainer().getSecurityContext();
-            }
-
-            if (template.getInitContainer() != null && template.getInitContainer().getSecurityContext() != null) {
-                kafkaConnect.templateInitContainerSecurityContext = template.getInitContainer().getSecurityContext();
-            }
-
-            if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
-                kafkaConnect.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
-                kafkaConnect.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
-            }
-
-            if (template.getJmxSecret() != null && template.getJmxSecret().getMetadata() != null) {
-                kafkaConnect.templateJmxSecretLabels = template.getJmxSecret().getMetadata().getLabels();
-                kafkaConnect.templateJmxSecretAnnotations = template.getJmxSecret().getMetadata().getAnnotations();
-            }
-
-            ModelUtils.parsePodDisruptionBudgetTemplate(kafkaConnect, template.getPodDisruptionBudget());
+            kafkaConnect.templatePodDisruptionBudget = template.getPodDisruptionBudget();
+            kafkaConnect.templateInitClusterRoleBinding = template.getClusterRoleBinding();
+            kafkaConnect.templateDeployment = template.getDeployment();
+            kafkaConnect.templatePod = template.getPod();
+            kafkaConnect.templateJmxSecret = template.getJmxSecret();
+            kafkaConnect.templateService = template.getApiService();
+            kafkaConnect.templateServiceAccount = template.getServiceAccount();
+            kafkaConnect.templateContainer = template.getConnectContainer();
+            kafkaConnect.templateInitContainer = template.getInitContainer();
         }
 
         if (spec.getExternalConfiguration() != null)    {
@@ -310,31 +318,46 @@ public class KafkaConnectCluster extends AbstractModel {
             }
         }
 
-        kafkaConnect.templatePodLabels = Util.mergeLabelsOrAnnotations(kafkaConnect.templatePodLabels, DEFAULT_POD_LABELS);
-
         return kafkaConnect;
     }
 
+    /**
+     * @return The Kubernetes service name.
+     */
+    public String getServiceName() {
+        return serviceName;
+    }
+
+    /**
+     * @return  Generates the Kafka Connect service
+     */
     public Service generateService() {
         List<ServicePort> ports = new ArrayList<>(1);
-        ports.add(createServicePort(REST_API_PORT_NAME, REST_API_PORT, REST_API_PORT, "TCP"));
+        ports.add(ServiceUtils.createServicePort(REST_API_PORT_NAME, REST_API_PORT, REST_API_PORT, "TCP"));
 
         if (isJmxEnabled()) {
-            ports.add(createServicePort(JMX_PORT_NAME, JMX_PORT, JMX_PORT, "TCP"));
+            ports.add(ServiceUtils.createServicePort(JMX_PORT_NAME, JMX_PORT, JMX_PORT, "TCP"));
         }
 
-        return createService("ClusterIP", ports, Util.mergeLabelsOrAnnotations(templateServiceAnnotations));
+        return ServiceUtils.createClusterIpService(
+                serviceName,
+                namespace,
+                labels,
+                ownerReference,
+                templateService,
+                ports
+        );
     }
 
     protected List<ContainerPort> getContainerPortList() {
         List<ContainerPort> portList = new ArrayList<>(2);
-        portList.add(createContainerPort(REST_API_PORT_NAME, REST_API_PORT, "TCP"));
+        portList.add(ContainerUtils.createContainerPort(REST_API_PORT_NAME, REST_API_PORT));
         if (isMetricsEnabled) {
-            portList.add(createContainerPort(METRICS_PORT_NAME, METRICS_PORT, "TCP"));
+            portList.add(ContainerUtils.createContainerPort(METRICS_PORT_NAME, METRICS_PORT));
         }
 
         if (isJmxEnabled()) {
-            portList.add(createContainerPort(JMX_PORT_NAME, JMX_PORT, "TCP"));
+            portList.add(ContainerUtils.createContainerPort(JMX_PORT_NAME, JMX_PORT));
         }
 
         return portList;
@@ -342,7 +365,7 @@ public class KafkaConnectCluster extends AbstractModel {
 
     protected List<Volume> getVolumes(boolean isOpenShift) {
         List<Volume> volumeList = new ArrayList<>(2);
-        volumeList.add(createTempDirVolume());
+        volumeList.add(VolumeUtils.createTempDirVolume(templatePod));
         volumeList.add(VolumeUtils.createConfigMapVolume(logAndMetricsConfigVolumeName, ancillaryConfigMapName));
 
         if (rack != null) {
@@ -403,7 +426,7 @@ public class KafkaConnectCluster extends AbstractModel {
 
     protected List<VolumeMount> getVolumeMounts() {
         List<VolumeMount> volumeMountList = new ArrayList<>(2);
-        volumeMountList.add(createTempDirVolumeMount());
+        volumeMountList.add(VolumeUtils.createTempDirVolumeMount());
         volumeMountList.add(VolumeUtils.createVolumeMount(logAndMetricsConfigVolumeName, logAndMetricsConfigMountPath));
 
         if (rack != null) {
@@ -443,108 +466,123 @@ public class KafkaConnectCluster extends AbstractModel {
     }
 
     /**
-     * Returns a combined affinity: Adding the affinity needed for the "kafka-rack" to the {@link #getUserAffinity()}.
+     * Returns a combined affinity: Adding the affinity needed for the "kafka-rack" to the user-provided affinity.
      */
-    @Override
     protected Affinity getMergedAffinity() {
-        Affinity userAffinity = getUserAffinity();
-        AffinityBuilder builder = new AffinityBuilder(userAffinity == null ? new Affinity() : userAffinity);
+        Affinity userAffinity = templatePod != null && templatePod.getAffinity() != null ? templatePod.getAffinity() : new Affinity();
+        AffinityBuilder builder = new AffinityBuilder(userAffinity);
         if (rack != null) {
             builder = ModelUtils.populateAffinityBuilderWithRackLabelSelector(builder, userAffinity, rack.getTopologyKey());
         }
         return builder.build();
     }
 
+    /**
+     * Generates the Kafka Connect deployment
+     *
+     * @param annotations       Map with annotations
+     * @param isOpenShift       Flag indicating if we are on OpenShift or not
+     * @param imagePullPolicy   Image pull policy
+     * @param imagePullSecrets  List of image pull Secrets
+     *
+     * @return  Generated deployment
+     */
     public Deployment generateDeployment(Map<String, String> annotations, boolean isOpenShift, ImagePullPolicy imagePullPolicy, List<LocalObjectReference> imagePullSecrets) {
-        return createDeployment(
-                getDeploymentStrategy(),
-                Collections.emptyMap(),
-                annotations,
-                getMergedAffinity(),
-                getInitContainers(imagePullPolicy),
-                getContainers(imagePullPolicy),
-                getVolumes(isOpenShift),
-                imagePullSecrets,
-                securityProvider.kafkaConnectPodSecurityContext(new PodSecurityProviderContextImpl(templateSecurityContext)));
+        return WorkloadUtils.createDeployment(
+                componentName,
+                namespace,
+                labels,
+                ownerReference,
+                templateDeployment,
+                replicas,
+                WorkloadUtils.deploymentStrategy(TemplateUtils.deploymentStrategy(templateDeployment, ROLLING_UPDATE)),
+                WorkloadUtils.createPodTemplateSpec(
+                        componentName,
+                        labels,
+                        templatePod,
+                        defaultPodLabels(),
+                        annotations,
+                        getMergedAffinity(),
+                        ContainerUtils.listOrNull(createInitContainer(imagePullPolicy)),
+                        List.of(createContainer(imagePullPolicy)),
+                        getVolumes(isOpenShift),
+                        imagePullSecrets,
+                        securityProvider.kafkaConnectPodSecurityContext(new PodSecurityProviderContextImpl(templatePod))
+                )
+        );
     }
 
-    @Override
-    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
+    /* test */ Container createInitContainer(ImagePullPolicy imagePullPolicy) {
+        if (rack != null) {
+            return ContainerUtils.createContainer(
+                    INIT_NAME,
+                    initImage,
+                    List.of("/opt/strimzi/bin/kafka_init_run.sh"),
+                    securityProvider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(templateInitContainer)),
+                    resources,
+                    getInitContainerEnvVars(),
+                    null,
+                    List.of(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT)),
+                    null,
+                    null,
+                    imagePullPolicy
+            );
+        } else {
+            return null;
+        }
+    }
 
-        List<Container> containers = new ArrayList<>(1);
-
-        Container container = new ContainerBuilder()
-                .withName(name)
-                .withImage(getImage())
-                .withCommand(getCommand())
-                .withEnv(getEnvVars())
-                .withPorts(getContainerPortList())
-                .withLivenessProbe(ProbeGenerator.httpProbe(livenessProbeOptions, livenessPath, REST_API_PORT_NAME))
-                .withReadinessProbe(ProbeGenerator.httpProbe(readinessProbeOptions, readinessPath, REST_API_PORT_NAME))
-                .withVolumeMounts(getVolumeMounts())
-                .withResources(getResources())
-                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(securityProvider.kafkaConnectContainerSecurityContext(new ContainerSecurityProviderContextImpl(templateContainerSecurityContext)))
-                .build();
-
-        containers.add(container);
-
-        return containers;
+    /* test */ Container createContainer(ImagePullPolicy imagePullPolicy) {
+        return ContainerUtils.createContainer(
+                componentName,
+                image,
+                List.of(getCommand()),
+                securityProvider.kafkaConnectContainerSecurityContext(new ContainerSecurityProviderContextImpl(templateContainer)),
+                resources,
+                getEnvVars(),
+                getContainerPortList(),
+                getVolumeMounts(),
+                ProbeGenerator.httpProbe(livenessProbeOptions, livenessPath, REST_API_PORT_NAME),
+                ProbeGenerator.httpProbe(readinessProbeOptions, readinessPath, REST_API_PORT_NAME),
+                imagePullPolicy
+        );
     }
 
     protected List<EnvVar> getInitContainerEnvVars() {
         List<EnvVar> varList = new ArrayList<>();
-        varList.add(buildEnvVarFromFieldRef(ENV_VAR_KAFKA_INIT_NODE_NAME, "spec.nodeName"));
+        varList.add(ContainerUtils.createEnvVarFromFieldRef(ENV_VAR_KAFKA_INIT_NODE_NAME, "spec.nodeName"));
 
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_INIT_RACK_TOPOLOGY_KEY, rack.getTopologyKey()));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_INIT_RACK_TOPOLOGY_KEY, rack.getTopologyKey()));
 
         // Add shared environment variables used for all containers
-        varList.addAll(getRequiredEnvVars());
+        varList.addAll(ContainerUtils.requiredEnvVars());
 
-        addContainerEnvsToExistingEnvs(varList, templateInitContainerEnvVars);
+        ContainerUtils.addContainerEnvsToExistingEnvs(reconciliation, varList, templateInitContainer);
 
         return varList;
     }
 
-    @Override
-    protected List<Container> getInitContainers(ImagePullPolicy imagePullPolicy) {
-        List<Container> initContainers = new ArrayList<>(1);
-
-        if (rack != null) {
-            Container initContainer = new ContainerBuilder()
-                    .withName(INIT_NAME)
-                    .withImage(initImage)
-                    .withArgs("/opt/strimzi/bin/kafka_init_run.sh")
-                    .withEnv(getInitContainerEnvVars())
-                    .withVolumeMounts(VolumeUtils.createVolumeMount(INIT_VOLUME_NAME, INIT_VOLUME_MOUNT))
-                    .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, initImage))
-                    .withSecurityContext(securityProvider.kafkaConnectInitContainerSecurityContext(new ContainerSecurityProviderContextImpl(templateInitContainerSecurityContext)))
-                    .build();
-
-            if (getResources() != null) {
-                initContainer.setResources(getResources());
-            }
-            initContainers.add(initContainer);
-        }
-
-        return initContainers;
-    }
-
+    /**
+     * The command for running Connect has to be passed through a method so that we can handle different run commands
+     * for Connect and Mirror Maker 2 (which inherits from this class) without duplicating the whole container creation.
+     * This method is overridden in KafkaMirrorMaker2Model.
+     *
+     * @return  Command for starting Kafka Connect container
+     */
     protected String getCommand() {
         return "/opt/kafka/kafka_connect_run.sh";
     }
 
-    @Override
     protected List<EnvVar> getEnvVars() {
         List<EnvVar> varList = new ArrayList<>();
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_CONFIGURATION, configuration.getConfiguration()));
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_METRICS_ENABLED, String.valueOf(isMetricsEnabled)));
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_BOOTSTRAP_SERVERS, bootstrapServers));
-        varList.add(buildEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_CONFIGURATION, configuration.getConfiguration()));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_METRICS_ENABLED, String.valueOf(isMetricsEnabled)));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_BOOTSTRAP_SERVERS, bootstrapServers));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED, String.valueOf(gcLoggingEnabled)));
 
-        ModelUtils.heapOptions(varList, 75, 0L, getJvmOptions(), getResources());
-        ModelUtils.jvmPerformanceOptions(varList, getJvmOptions());
-        ModelUtils.jvmSystemProperties(varList, getJvmOptions());
+        ModelUtils.heapOptions(varList, 75, 0L, jvmOptions, resources);
+        ModelUtils.jvmPerformanceOptions(varList, jvmOptions);
+        ModelUtils.jvmSystemProperties(varList, jvmOptions);
 
         if (tls != null) {
             populateTLSEnvVars(varList);
@@ -553,29 +591,29 @@ public class KafkaConnectCluster extends AbstractModel {
         AuthenticationUtils.configureClientAuthenticationEnvVars(authentication, varList, name -> ENV_VAR_PREFIX + name);
 
         if (tracing != null) {
-            varList.add(buildEnvVar(ENV_VAR_STRIMZI_TRACING, tracing.getType()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_STRIMZI_TRACING, tracing.getType()));
         }
 
         if (isJmxEnabled()) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_JMX_ENABLED, "true"));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_JMX_ENABLED, "true"));
             if (isJmxAuthenticated) {
-                varList.add(buildEnvVarFromSecret(ENV_VAR_KAFKA_CONNECT_JMX_USERNAME, jmxSecretName(cluster), SECRET_JMX_USERNAME_KEY));
-                varList.add(buildEnvVarFromSecret(ENV_VAR_KAFKA_CONNECT_JMX_PASSWORD, jmxSecretName(cluster), SECRET_JMX_PASSWORD_KEY));
+                varList.add(ContainerUtils.createEnvVarFromSecret(ENV_VAR_KAFKA_CONNECT_JMX_USERNAME, jmxSecretName(cluster), SECRET_JMX_USERNAME_KEY));
+                varList.add(ContainerUtils.createEnvVarFromSecret(ENV_VAR_KAFKA_CONNECT_JMX_PASSWORD, jmxSecretName(cluster), SECRET_JMX_PASSWORD_KEY));
             }
         }
 
         // Add shared environment variables used for all containers
-        varList.addAll(getRequiredEnvVars());
+        varList.addAll(ContainerUtils.requiredEnvVars());
 
         varList.addAll(getExternalConfigurationEnvVars());
 
-        addContainerEnvsToExistingEnvs(varList, templateContainerEnvVars);
+        ContainerUtils.addContainerEnvsToExistingEnvs(reconciliation, varList, templateContainer);
 
         return varList;
     }
 
     private void populateTLSEnvVars(final List<EnvVar> varList) {
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TLS, "true"));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_TLS, "true"));
 
         List<CertSecretSource> trustedCertificates = tls.getTrustedCertificates();
 
@@ -589,7 +627,7 @@ public class KafkaConnectCluster extends AbstractModel {
                 sb.append(certSecretSource.getSecretName()).append("/").append(certSecretSource.getCertificate());
                 separator = true;
             }
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS, sb.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_CONNECT_TRUSTED_CERTS, sb.toString()));
         }
     }
 
@@ -637,11 +675,6 @@ public class KafkaConnectCluster extends AbstractModel {
         this.initImage = initImage;
     }
 
-    @Override
-    protected String getDefaultLogConfigFileName() {
-        return "kafkaConnectDefaultLoggingProperties";
-    }
-
     /**
      * Set the bootstrap servers to connect to
      *
@@ -672,26 +705,24 @@ public class KafkaConnectCluster extends AbstractModel {
     /**
      * Generates the PodDisruptionBudget
      *
-     * @return The PodDisruptionBudget.
+     * @return The pod disruption budget.
      */
     public PodDisruptionBudget generatePodDisruptionBudget() {
-        return createPodDisruptionBudget();
+        return PodDisruptionBudgetUtils.createPodDisruptionBudget(componentName, namespace, labels, ownerReference, templatePodDisruptionBudget);
     }
 
     /**
      * Generates the PodDisruptionBudgetV1Beta1
      *
-     * @return The PodDisruptionBudgetV1Beta1.
+     * @return The pod disruption budget V1Beta1.
      */
     public io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget generatePodDisruptionBudgetV1Beta1() {
-        return createPodDisruptionBudgetV1Beta1();
+        return PodDisruptionBudgetUtils.createPodDisruptionBudgetV1Beta1(componentName, namespace, labels, ownerReference, templatePodDisruptionBudget);
     }
 
-    @Override
-    public String getServiceAccountName() {
-        return KafkaConnectResources.serviceAccountName(cluster);
-    }
-
+    /**
+     * @return  Name of the ClusterRoleBinding for the Connect init container
+     */
     public String getInitContainerClusterRoleBindingName() {
         return KafkaConnectResources.initContainerClusterRoleBindingName(cluster, namespace);
     }
@@ -712,11 +743,14 @@ public class KafkaConnectCluster extends AbstractModel {
         isJmxEnabled = jmxEnabled;
     }
 
+    /**
+     * @return  True if the JMX authentication is enabled. False otherwise.
+     */
     public boolean isJmxAuthenticated() {
         return isJmxAuthenticated;
     }
 
-    public void setJmxAuthenticated(boolean jmxAuthenticated) {
+    protected void setJmxAuthenticated(boolean jmxAuthenticated) {
         isJmxAuthenticated = jmxAuthenticated;
     }
 
@@ -741,10 +775,16 @@ public class KafkaConnectCluster extends AbstractModel {
             data.put(key, Base64.getEncoder().encodeToString(passwordGenerator.generate().getBytes(StandardCharsets.US_ASCII)));
         }
 
-        return createJmxSecret(KafkaConnectCluster.jmxSecretName(cluster), data);
+        return ModelUtils.createSecret(
+                KafkaConnectCluster.jmxSecretName(cluster),
+                namespace,
+                labels,
+                ownerReference,
+                data,
+                TemplateUtils.annotations(templateJmxSecret),
+                TemplateUtils.labels(templateJmxSecret)
+        );
     }
-
-
 
     /**
      * Generates the NetworkPolicies relevant for Kafka Connect nodes
@@ -758,74 +798,33 @@ public class KafkaConnectCluster extends AbstractModel {
     public NetworkPolicy generateNetworkPolicy(boolean connectorOperatorEnabled,
                                                String operatorNamespace, Labels operatorNamespaceLabels) {
         if (connectorOperatorEnabled) {
-            List<NetworkPolicyIngressRule> rules = new ArrayList<>(2);
+            NetworkPolicyPeer clusterOperatorPeer = NetworkPolicyUtils.createPeer(Map.of(Labels.STRIMZI_KIND_LABEL, "cluster-operator"), NetworkPolicyUtils.clusterOperatorNamespaceSelector(namespace, operatorNamespace, operatorNamespaceLabels));
+            NetworkPolicyPeer connectPeer = NetworkPolicyUtils.createPeer(labels.strimziSelectorLabels().toMap());
 
-            // Give CO access to the REST API
-            NetworkPolicyIngressRule restApiRule = new NetworkPolicyIngressRuleBuilder()
-                    .addNewPort()
-                        .withNewPort(REST_API_PORT)
-                        .withProtocol("TCP")
-                    .endPort()
-                    .build();
+            // List of network policy rules for all ports
+            List<NetworkPolicyIngressRule> rules = new ArrayList<>();
 
-            // OCP 3.11 doesn't support network policies with the `from` section containing a namespace.
-            // Since the CO can run in a different namespace, we have to leave it wide open on OCP 3.11
-            // Therefore these rules are set only when using something else than OCP 3.11 and leaving
-            // the `from` section empty on 3.11
-            List<NetworkPolicyPeer> peers = new ArrayList<>(2);
+            // Give CO and Connect itself access to the REST API
+            rules.add(NetworkPolicyUtils.createIngressRule(REST_API_PORT, List.of(connectPeer, clusterOperatorPeer)));
 
-            // Other connect pods in the same cluster need to talk with each other over the REST API
-            NetworkPolicyPeer connectPeer = new NetworkPolicyPeerBuilder()
-                    .withNewPodSelector()
-                    .addToMatchLabels(getSelectorLabels().toMap())
-                    .endPodSelector()
-                    .build();
-            peers.add(connectPeer);
-
-            // CO needs to talk with the Connect pods to manage connectors
-            NetworkPolicyPeer clusterOperatorPeer = new NetworkPolicyPeerBuilder()
-                    .withNewPodSelector()
-                    .addToMatchLabels(Labels.STRIMZI_KIND_LABEL, "cluster-operator")
-                    .endPodSelector()
-                    .build();
-            ModelUtils.setClusterOperatorNetworkPolicyNamespaceSelector(clusterOperatorPeer, namespace, operatorNamespace, operatorNamespaceLabels);
-
-            peers.add(clusterOperatorPeer);
-
-            restApiRule.setFrom(peers);
-
-            rules.add(restApiRule);
-
-            // If metrics are enabled, we have to open them as well. Otherwise they will be blocked.
+            // The Metrics port (if enabled) is opened to all by default
             if (isMetricsEnabled) {
-                NetworkPolicyIngressRule metricsRule = new NetworkPolicyIngressRuleBuilder()
-                        .addNewPort()
-                            .withNewPort(METRICS_PORT)
-                            .withProtocol("TCP")
-                        .endPort()
-                        .withFrom()
-                        .build();
-
-                rules.add(metricsRule);
+                rules.add(NetworkPolicyUtils.createIngressRule(METRICS_PORT, List.of()));
             }
 
-            NetworkPolicy networkPolicy = new NetworkPolicyBuilder()
-                    .withNewMetadata()
-                        .withName(name)
-                        .withNamespace(namespace)
-                        .withLabels(labels.toMap())
-                        .withOwnerReferences(createOwnerReference())
-                    .endMetadata()
-                    .withNewSpec()
-                        .withNewPodSelector()
-                            .addToMatchLabels(getSelectorLabels().toMap())
-                        .endPodSelector()
-                        .withIngress(rules)
-                    .endSpec()
-                    .build();
+            // The JMX port (if enabled) is opened to all by default
+            if (isJmxEnabled) {
+                rules.add(NetworkPolicyUtils.createIngressRule(JMX_PORT, List.of()));
+            }
 
-            LOGGER.traceCr(reconciliation, "Created network policy {}", networkPolicy);
-            return networkPolicy;
+            // Build the final network policy with all rules covering all the ports
+            return NetworkPolicyUtils.createNetworkPolicy(
+                    componentName,
+                    namespace,
+                    labels,
+                    ownerReference,
+                    rules
+            );
         } else {
             return null;
         }
@@ -847,27 +846,56 @@ public class KafkaConnectCluster extends AbstractModel {
      * @return The cluster role binding.
      */
     public ClusterRoleBinding generateClusterRoleBinding() {
-        if (rack == null) {
+        if (rack != null) {
+            Subject subject = new SubjectBuilder()
+                    .withKind("ServiceAccount")
+                    .withName(componentName)
+                    .withNamespace(namespace)
+                    .build();
+
+            RoleRef roleRef = new RoleRefBuilder()
+                    .withName("strimzi-kafka-client")
+                    .withApiGroup("rbac.authorization.k8s.io")
+                    .withKind("ClusterRole")
+                    .build();
+
+            return RbacUtils
+                    .createClusterRoleBinding(getInitContainerClusterRoleBindingName(), roleRef, List.of(subject), labels, templateInitClusterRoleBinding);
+        } else {
             return null;
         }
-
-        Subject subject = new SubjectBuilder()
-                .withKind("ServiceAccount")
-                .withName(getServiceAccountName())
-                .withNamespace(namespace)
-                .build();
-
-        RoleRef roleRef = new RoleRefBuilder()
-                .withName("strimzi-kafka-client")
-                .withApiGroup("rbac.authorization.k8s.io")
-                .withKind("ClusterRole")
-                .build();
-
-        return getClusterRoleBinding(getInitContainerClusterRoleBindingName(), subject, roleRef);
     }
 
+    /**
+     * Generates the logging configuration as a String. The configuration is generated based on the default logging
+     * configuration files from resources, the (optional) inline logging configuration from the custom resource
+     * and the (optional) external logging configuration in a user-provided ConfigMap.
+     *
+     * @param externalCm The user-provided ConfigMap with custom Log4j / Log4j2 file
+     *
+     * @return String with the Log4j / Log4j2 properties used for configuration
+     */
     @Override
-    protected boolean shouldPatchLoggerAppender() {
-        return true;
+    public String loggingConfiguration(ConfigMap externalCm) {
+        return loggingConfiguration(externalCm, true);
+    }
+
+    /**
+     * @return  Default logging configuration needed to update loggers in Kafka Connect (and Kafka Mirror Maker 2 which
+     *          is based on Kafka Connect)
+     */
+    public OrderedProperties defaultLogConfig()   {
+        return LoggingUtils.defaultLogConfig(reconciliation, this.getClass().getSimpleName());
+    }
+
+    /**
+     * The default labels Connect pod has to be passed through a method so that we can handle different labels for
+     * Connect and Mirror Maker 2 (which inherits from this class) without duplicating the whole pod creation.
+     * This method is overridden in KafkaMirrorMaker2Model.
+     *
+     * @return Default Pod Labels for Kafka Connect
+     */
+    protected Map<String, String> defaultPodLabels() {
+        return DEFAULT_POD_LABELS;
     }
 }

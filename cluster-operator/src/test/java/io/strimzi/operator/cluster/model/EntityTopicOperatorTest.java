@@ -19,6 +19,7 @@ import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.SystemProperty;
 import io.strimzi.api.kafka.model.SystemPropertyBuilder;
+import io.strimzi.api.kafka.model.template.EntityOperatorTemplateBuilder;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.test.annotations.ParallelSuite;
@@ -27,6 +28,7 @@ import io.strimzi.test.annotations.ParallelTest;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static io.strimzi.test.TestUtils.map;
 import static org.hamcrest.CoreMatchers.is;
@@ -92,6 +94,14 @@ public class EntityTopicOperatorTest {
 
     private final EntityOperatorSpec entityOperatorSpec = new EntityOperatorSpecBuilder()
             .withTopicOperator(entityTopicOperatorSpec)
+            .withTemplate(new EntityOperatorTemplateBuilder()
+                    .withNewTopicOperatorRoleBinding()
+                        .withNewMetadata()
+                            .withLabels(Map.of("label-1", "value-1"))
+                            .withAnnotations(Map.of("anno-1", "value-1"))
+                        .endMetadata()
+                    .endTopicOperatorRoleBinding()
+                    .build())
             .build();
 
     private final Kafka resource =
@@ -239,10 +249,7 @@ public class EntityTopicOperatorTest {
 
     @ParallelTest
     public void testGetContainers() {
-        List<Container> containers = entityTopicOperator.getContainers(null);
-        assertThat(containers.size(), is(1));
-
-        Container container = containers.get(0);
+        Container container = entityTopicOperator.createContainer(null);
         assertThat(container.getName(), is(EntityTopicOperator.TOPIC_OPERATOR_CONTAINER_NAME));
         assertThat(container.getImage(), is(entityTopicOperator.getImage()));
         assertThat(container.getEnv(), is(getExpectedEnvVars()));
@@ -255,7 +262,7 @@ public class EntityTopicOperatorTest {
         assertThat(container.getPorts().get(0).getName(), is(EntityTopicOperator.HEALTHCHECK_PORT_NAME));
         assertThat(container.getPorts().get(0).getProtocol(), is("TCP"));
         assertThat(EntityOperatorTest.volumeMounts(container.getVolumeMounts()), is(map(
-                EntityTopicOperator.TOPIC_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
+                EntityTopicOperator.TOPIC_OPERATOR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
                 "entity-topic-operator-metrics-and-logging", "/opt/topic-operator/custom-config/",
                 EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT,
                 EntityOperator.ETO_CERTS_VOLUME_NAME, EntityOperator.ETO_CERTS_VOLUME_MOUNT)));
@@ -268,6 +275,8 @@ public class EntityTopicOperatorTest {
         assertThat(binding.getSubjects().get(0).getNamespace(), is(namespace));
         assertThat(binding.getMetadata().getNamespace(), is(toWatchedNamespace));
         assertThat(binding.getMetadata().getOwnerReferences().size(), is(0));
+        assertThat(binding.getMetadata().getLabels().get("label-1"), is("value-1"));
+        assertThat(binding.getMetadata().getAnnotations().get("anno-1"), is("value-1"));
 
         assertThat(binding.getRoleRef().getKind(), is("Role"));
         assertThat(binding.getRoleRef().getName(), is("foo-entity-operator"));
@@ -280,6 +289,8 @@ public class EntityTopicOperatorTest {
         assertThat(binding.getSubjects().get(0).getNamespace(), is(namespace));
         assertThat(binding.getMetadata().getNamespace(), is(namespace));
         assertThat(binding.getMetadata().getOwnerReferences().size(), is(1));
+        assertThat(binding.getMetadata().getLabels().get("label-1"), is("value-1"));
+        assertThat(binding.getMetadata().getAnnotations().get("anno-1"), is("value-1"));
 
         assertThat(binding.getRoleRef().getKind(), is("Role"));
         assertThat(binding.getRoleRef().getName(), is("foo-entity-operator"));

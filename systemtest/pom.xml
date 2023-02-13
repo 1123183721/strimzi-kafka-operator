@@ -5,7 +5,7 @@
     <parent>
         <artifactId>strimzi</artifactId>
         <groupId>io.strimzi</groupId>
-        <version>0.31.0-SNAPSHOT</version>
+        <version>0.34.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>systemtest</artifactId>
@@ -27,7 +27,7 @@
         <dependency>
             <groupId>org.valid4j</groupId>
             <artifactId>json-path-matchers</artifactId>
-            <scope>compile</scope>
+            <scope>test</scope>
             <exclusions>
                 <exclusion>
                     <groupId>org.hamcrest</groupId>
@@ -55,6 +55,11 @@
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-httpclient-jdk</artifactId>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client-api</artifactId>
         </dependency>
         <dependency>
@@ -64,6 +69,7 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-model-storageclass</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
@@ -88,6 +94,7 @@
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>openshift-model</artifactId>
+            <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.fabric8</groupId>
@@ -128,6 +135,11 @@
         <dependency>
             <groupId>org.junit.platform</groupId>
             <artifactId>junit-platform-launcher</artifactId>
+            <scope>compile</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-engine</artifactId>
             <scope>compile</scope>
         </dependency>
         <dependency>
@@ -188,11 +200,6 @@
             <scope>compile</scope>
         </dependency>
         <dependency>
-            <groupId>io.strimzi</groupId>
-            <artifactId>kafka-oauth-client</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
@@ -222,12 +229,22 @@
             <version>${sundrio.version}</version>
             <scope>provided</scope>
         </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-model-coordination</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>openshift-model-operatorhub</artifactId>
+        </dependency>
     </dependencies>
 
     <build>
         <plugins>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.version}</version>
                 <executions>
                     <execution>
                         <id>default-compile</id>
@@ -367,7 +384,7 @@
             <id>azp_kafka_oauth</id>
             <properties>
                 <skipTests>false</skipTests>
-                <groups>regression</groups>
+                <groups>regression,kafkasmoke</groups>
                 <it.test>
                     kafka/**/*ST,
                     !kafka/listeners/*ST,
@@ -503,6 +520,16 @@
                 <it.test>
                     KafkaUpgradeDowngradeIsolatedST
                 </it.test>
+            </properties>
+        </profile>
+
+        <profile>
+            <id>scalability</id>
+            <properties>
+                <skipTests>false</skipTests>
+                <groups>
+                    all,scalability
+                </groups>
             </properties>
         </profile>
     </profiles>

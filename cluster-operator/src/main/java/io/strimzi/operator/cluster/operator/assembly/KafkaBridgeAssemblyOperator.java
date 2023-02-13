@@ -5,6 +5,7 @@
 package io.strimzi.operator.cluster.operator.assembly;
 
 import io.fabric8.kubernetes.api.model.ServiceAccount;
+import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.dsl.Resource;
 import io.strimzi.api.kafka.KafkaBridgeList;
@@ -18,7 +19,6 @@ import io.strimzi.certs.CertManager;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.model.KafkaBridgeCluster;
-import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.ReconciliationLogger;
@@ -46,7 +46,6 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaBridgeAssemblyOperator.class.getName());
 
     private final DeploymentOperator deploymentOperations;
-    private final KafkaVersion.Lookup versions;
 
     /**
      * @param vertx The Vertx instance
@@ -62,7 +61,6 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
                                        ClusterOperatorConfig config) {
         super(vertx, pfa, KafkaBridge.RESOURCE_KIND, certManager, passwordGenerator, supplier.kafkaBridgeOperator, supplier, config);
         this.deploymentOperations = supplier.deploymentOperations;
-        this.versions = config.versions();
     }
 
     @Override
@@ -73,7 +71,7 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         KafkaBridgeCluster bridge;
 
         try {
-            bridge = KafkaBridgeCluster.fromCrd(reconciliation, assemblyResource, versions);
+            bridge = KafkaBridgeCluster.fromCrd(reconciliation, assemblyResource);
         } catch (Exception e) {
             LOGGER.warnCr(reconciliation, e);
             StatusUtils.setStatusConditionAndObservedGeneration(assemblyResource, kafkaBridgeStatus, Future.failedFuture(e));
@@ -85,19 +83,24 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         Promise<KafkaBridgeStatus> createOrUpdatePromise = Promise.promise();
 
         boolean bridgeHasZeroReplicas = bridge.getReplicas() == 0;
+
+        String initCrbName = KafkaBridgeResources.initContainerClusterRoleBindingName(bridge.getCluster(), namespace);
+        ClusterRoleBinding initCrb = bridge.generateClusterRoleBinding();
+
         LOGGER.debugCr(reconciliation, "Updating Kafka Bridge cluster");
         kafkaBridgeServiceAccount(reconciliation, namespace, bridge)
-            .compose(i -> deploymentOperations.scaleDown(reconciliation, namespace, bridge.getName(), bridge.getReplicas()))
-            .compose(scale -> serviceOperations.reconcile(reconciliation, namespace, bridge.getServiceName(), bridge.generateService()))
+            .compose(i -> bridgeInitClusterRoleBinding(reconciliation, initCrbName, initCrb))
+            .compose(i -> deploymentOperations.scaleDown(reconciliation, namespace, bridge.getComponentName(), bridge.getReplicas()))
+            .compose(scale -> serviceOperations.reconcile(reconciliation, namespace, KafkaBridgeResources.serviceName(bridge.getCluster()), bridge.generateService()))
             .compose(i -> Util.metricsAndLogging(reconciliation, configMapOperations, namespace, bridge.getLogging(), null))
             .compose(metricsAndLogging -> configMapOperations.reconcile(reconciliation, namespace, bridge.getAncillaryConfigMapName(), bridge.generateMetricsAndLogConfigMap(metricsAndLogging)))
-            .compose(i -> pfa.hasPodDisruptionBudgetV1() ? podDisruptionBudgetOperator.reconcile(reconciliation, namespace, bridge.getName(), bridge.generatePodDisruptionBudget()) : Future.succeededFuture())
-            .compose(i -> !pfa.hasPodDisruptionBudgetV1() ? podDisruptionBudgetV1Beta1Operator.reconcile(reconciliation, namespace, bridge.getName(), bridge.generatePodDisruptionBudgetV1Beta1()) : Future.succeededFuture())
+            .compose(i -> pfa.hasPodDisruptionBudgetV1() ? podDisruptionBudgetOperator.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generatePodDisruptionBudget()) : Future.succeededFuture())
+            .compose(i -> !pfa.hasPodDisruptionBudgetV1() ? podDisruptionBudgetV1Beta1Operator.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generatePodDisruptionBudgetV1Beta1()) : Future.succeededFuture())
             .compose(i -> Util.authTlsHash(secretOperations, namespace, auth, trustedCertificates))
-            .compose(hash -> deploymentOperations.reconcile(reconciliation, namespace, bridge.getName(), bridge.generateDeployment(Collections.singletonMap(Annotations.ANNO_STRIMZI_AUTH_HASH, Integer.toString(hash)), pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
-            .compose(i -> deploymentOperations.scaleUp(reconciliation, namespace, bridge.getName(), bridge.getReplicas()))
-            .compose(i -> deploymentOperations.waitForObserved(reconciliation, namespace, bridge.getName(), 1_000, operationTimeoutMs))
-            .compose(i -> bridgeHasZeroReplicas ? Future.succeededFuture() : deploymentOperations.readiness(reconciliation, namespace, bridge.getName(), 1_000, operationTimeoutMs))
+            .compose(hash -> deploymentOperations.reconcile(reconciliation, namespace, bridge.getComponentName(), bridge.generateDeployment(Collections.singletonMap(Annotations.ANNO_STRIMZI_AUTH_HASH, Integer.toString(hash)), pfa.isOpenshift(), imagePullPolicy, imagePullSecrets)))
+            .compose(i -> deploymentOperations.scaleUp(reconciliation, namespace, bridge.getComponentName(), bridge.getReplicas()))
+            .compose(i -> deploymentOperations.waitForObserved(reconciliation, namespace, bridge.getComponentName(), 1_000, operationTimeoutMs))
+            .compose(i -> bridgeHasZeroReplicas ? Future.succeededFuture() : deploymentOperations.readiness(reconciliation, namespace, bridge.getComponentName(), 1_000, operationTimeoutMs))
             .onComplete(reconciliationResult -> {
                 StatusUtils.setStatusConditionAndObservedGeneration(assemblyResource, kafkaBridgeStatus, reconciliationResult.mapEmpty());
                 if (!bridgeHasZeroReplicas) {
@@ -121,6 +124,21 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         return createOrUpdatePromise.future();
     }
 
+
+    /**
+     * Deletes the ClusterRoleBinding which as a cluster-scoped resource cannot be deleted by the ownerReference
+     *
+     * @param reconciliation The Reconciliation identification
+     * @return Future indicating the result of the deletion
+     */
+    @Override
+    protected Future<Boolean> delete(Reconciliation reconciliation) {
+        return super.delete(reconciliation)
+                    .compose(i -> ReconcilerUtils.withIgnoreRbacError(reconciliation, clusterRoleBindingOperations.reconcile(reconciliation, KafkaBridgeResources.initContainerClusterRoleBindingName(reconciliation.name(), reconciliation.namespace()), null), null))
+                    .map(Boolean.FALSE); // Return FALSE since other resources are still deleted by garbage collection
+    }
+
+
     @Override
     protected KafkaBridgeStatus createStatus() {
         return new KafkaBridgeStatus();
@@ -130,5 +148,9 @@ public class KafkaBridgeAssemblyOperator extends AbstractAssemblyOperator<Kubern
         return serviceAccountOperations.reconcile(reconciliation, namespace,
                 KafkaBridgeResources.serviceAccountName(bridge.getCluster()),
                 bridge.generateServiceAccount());
+    }
+
+    protected Future<ReconcileResult<ClusterRoleBinding>> bridgeInitClusterRoleBinding(Reconciliation reconciliation, String crbName, ClusterRoleBinding crb) {
+        return ReconcilerUtils.withIgnoreRbacError(reconciliation, clusterRoleBindingOperations.reconcile(reconciliation, crbName, crb), crb);
     }
 }

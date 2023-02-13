@@ -35,6 +35,7 @@ import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.storage.EphemeralStorage;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
+import io.strimzi.api.kafka.model.template.DeploymentStrategy;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
 import io.strimzi.operator.cluster.ResourceUtils;
 import io.strimzi.operator.common.Reconciliation;
@@ -132,7 +133,7 @@ public class KafkaExporterTest {
                 kafkaStorage, zkStorage, kafkaLogJson, zooLogJson, new KafkaExporterSpec(), null);
         KafkaExporter ke = KafkaExporter.fromCrd(new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()), resource, VERSIONS);
         assertThat(ke.getImage(), is(KafkaVersionTestUtils.DEFAULT_KAFKA_IMAGE));
-        assertThat(ke.logging, is("info"));
+        assertThat(ke.exporterLogging, is("info"));
         assertThat(ke.groupRegex, is(".*"));
         assertThat(ke.topicRegex, is(".*"));
         assertThat(ke.saramaLoggingEnabled, is(false));
@@ -143,7 +144,7 @@ public class KafkaExporterTest {
         assertThat(ke.namespace, is(namespace));
         assertThat(ke.cluster, is(cluster));
         assertThat(ke.getImage(), is(keImage));
-        assertThat(ke.logging, is("debug"));
+        assertThat(ke.exporterLogging, is("debug"));
         assertThat(ke.groupRegex, is("my-group-.*"));
         assertThat(ke.topicRegex, is("my-topic-.*"));
         assertThat(ke.saramaLoggingEnabled, is(true));
@@ -159,8 +160,7 @@ public class KafkaExporterTest {
 
         assertThat(dep.getMetadata().getName(), is(KafkaExporterResources.deploymentName(cluster)));
         assertThat(dep.getMetadata().getNamespace(), is(namespace));
-        assertThat(dep.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(dep.getMetadata().getOwnerReferences().get(0), is(ke.createOwnerReference()));
+        TestUtils.checkOwnerReference(dep, resource);
 
         // checks on the main Exporter container
         assertThat(containers.get(0).getImage(), is(ke.image));
@@ -187,7 +187,7 @@ public class KafkaExporterTest {
         List<Volume> volumes = dep.getSpec().getTemplate().getSpec().getVolumes();
         assertThat(volumes.size(), is(3));
 
-        Volume volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
+        Volume volume = volumes.stream().filter(vol -> VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
         assertThat(volume.getEmptyDir().getSizeLimit(), is(new Quantity("100Mi")));
@@ -204,9 +204,9 @@ public class KafkaExporterTest {
         List<VolumeMount> volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(0).getVolumeMounts();
         assertThat(volumesMounts.size(), is(3));
 
-        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
+        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
-        assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
+        assertThat(volumeMount.getMountPath(), is(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
 
         volumeMount = volumesMounts.stream().filter(vol -> KafkaExporter.CLUSTER_CA_CERTS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
@@ -418,6 +418,26 @@ public class KafkaExporterTest {
         ServiceAccount sa = ke.generateServiceAccount();
         assertThat(sa.getMetadata().getLabels().entrySet().containsAll(saLabels.entrySet()), is(true));
         assertThat(sa.getMetadata().getAnnotations().entrySet().containsAll(saAnots.entrySet()), is(true));
+    }
+
+    @ParallelTest
+    public void testGenerateDeploymentWithRecreateDeploymentStrategy() {
+        Kafka resource = 
+                new KafkaBuilder(ResourceUtils.createKafka(namespace, cluster, replicas, image, healthDelay, healthTimeout))
+                .editSpec()
+                    .withNewKafkaExporter()
+                        .withNewTemplate()
+                            .withNewDeployment()
+                                .withDeploymentStrategy(DeploymentStrategy.RECREATE)
+                            .endDeployment()
+                        .endTemplate()
+                    .endKafkaExporter()
+                .endSpec()
+                .build();
+        KafkaExporter ke = KafkaExporter.fromCrd(new Reconciliation("test", resource.getKind(), 
+                resource.getMetadata().getNamespace(), resource.getMetadata().getName()), resource, VERSIONS);
+        Deployment dep = ke.generateDeployment(true, null, null);
+        assertThat(dep.getSpec().getStrategy().getType(), is("Recreate"));
     }
 
     @AfterAll

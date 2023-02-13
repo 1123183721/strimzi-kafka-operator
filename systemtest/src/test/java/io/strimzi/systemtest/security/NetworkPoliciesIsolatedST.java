@@ -112,13 +112,13 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
             .endSpec()
             .build(),
             ScraperTemplates.scraperPod(testStorage.getNamespaceName(), testStorage.getScraperName()).build(),
-            KafkaUserTemplates.scramShaUser(testStorage.getClusterName(), testStorage.getUserName()).build(),
+            KafkaUserTemplates.scramShaUser(testStorage).build(),
             KafkaTopicTemplates.topic(testStorage.getClusterName(), topic0).build(),
             KafkaTopicTemplates.topic(testStorage.getClusterName(), topic1).build()
         );
 
         final String scraperPodName = kubeClient().listPodsByPrefixInName(testStorage.getNamespaceName(), testStorage.getScraperName()).get(0).getMetadata().getName();
-        NetworkPolicyResource.allowNetworkPolicySettingsForKafkaExporter(extensionContext, testStorage.getClusterName());
+        NetworkPolicyResource.allowNetworkPolicySettingsForKafkaExporter(extensionContext, testStorage.getClusterName(), testStorage.getNamespaceName());
 
         LOGGER.info("Verifying that producer/consumer: {}/{} are able to exchange messages", testStorage.getProducerName(), testStorage.getConsumerName());
 
@@ -126,14 +126,14 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
             .withProducerName(testStorage.getProducerName())
             .withConsumerName(testStorage.getConsumerName())
             .withNamespaceName(testStorage.getNamespaceName())
-            .withMessageCount(MESSAGE_COUNT)
+            .withMessageCount(testStorage.getMessageCount())
             .withBootstrapAddress(KafkaResources.plainBootstrapAddress(testStorage.getClusterName()))
             .withTopicName(topic0)
             .withUserName(testStorage.getUserName())
             .build();
 
         resourceManager.createResource(extensionContext, kafkaClients.producerScramShaPlainStrimzi(), kafkaClients.consumerScramShaPlainStrimzi());
-        ClientUtils.waitForClientsSuccess(testStorage.getProducerName(), testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForClientsSuccess(testStorage);
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withProducerName(deniedProducerName)
@@ -143,7 +143,7 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
 
         LOGGER.info("Verifying that producer/consumer: {}/{} are not able to exchange messages", deniedProducerName, deniedConsumerName);
         resourceManager.createResource(extensionContext, kafkaClients.producerStrimzi(), kafkaClients.consumerStrimzi());
-        ClientUtils.waitForClientsTimeout(testStorage.getProducerName(), testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForClientsTimeout(testStorage);
 
         LOGGER.info("Check metrics exported by Kafka Exporter");
 
@@ -153,9 +153,9 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
             .withComponentType(ComponentType.KafkaExporter)
             .build();
 
-        Map<String, String> kafkaExporterMetricsData = metricsCollector.collectMetricsFromPods();
-        assertThat("Kafka Exporter metrics should be non-empty", kafkaExporterMetricsData.size() > 0);
-        for (Map.Entry<String, String> entry : kafkaExporterMetricsData.entrySet()) {
+        metricsCollector.collectMetricsFromPods();
+        assertThat("Kafka Exporter metrics should be non-empty", metricsCollector.getCollectedData().size() > 0);
+        for (Map.Entry<String, String> entry : metricsCollector.getCollectedData().entrySet()) {
             assertThat("Value from collected metric should be non-empty", !entry.getValue().isEmpty());
             assertThat("Metrics doesn't contain specific values", entry.getValue().contains("kafka_consumergroup_current_offset"));
             assertThat("Metrics doesn't contain specific values", entry.getValue().contains("kafka_topic_partitions{topic=\"" + topic0 + "\"} 1"));
@@ -210,7 +210,7 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
             .build(),
             KafkaTopicTemplates.topic(testStorage.getClusterName(), topic0).build(),
             KafkaTopicTemplates.topic(testStorage.getClusterName(), topic1).build(),
-            KafkaUserTemplates.scramShaUser(testStorage.getClusterName(), testStorage.getUserName()).build()
+            KafkaUserTemplates.scramShaUser(testStorage).build()
         );
 
         LOGGER.info("Verifying that producer/consumer: {}/{} are able to exchange messages", testStorage.getProducerName(), testStorage.getConsumerName());
@@ -219,14 +219,14 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
             .withProducerName(testStorage.getProducerName())
             .withConsumerName(testStorage.getConsumerName())
             .withNamespaceName(testStorage.getNamespaceName())
-            .withMessageCount(MESSAGE_COUNT)
+            .withMessageCount(testStorage.getMessageCount())
             .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(testStorage.getClusterName()))
             .withTopicName(topic0)
             .withUserName(testStorage.getUserName())
             .build();
 
         resourceManager.createResource(extensionContext, kafkaClients.producerScramShaTlsStrimzi(testStorage.getClusterName()), kafkaClients.consumerScramShaTlsStrimzi(testStorage.getClusterName()));
-        ClientUtils.waitForClientsSuccess(testStorage.getProducerName(), testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForClientsSuccess(testStorage);
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withProducerName(deniedProducerName)
@@ -236,7 +236,7 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
 
         LOGGER.info("Verifying that producer/consumer: {}/{} are not able to exchange messages", deniedProducerName, deniedConsumerName);
         resourceManager.createResource(extensionContext, kafkaClients.producerStrimzi(), kafkaClients.consumerStrimzi());
-        ClientUtils.waitForClientsTimeout(testStorage.getProducerName(), testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForClientsTimeout(testStorage);
     }
 
     @IsolatedTest("Specific cluster operator for test case")
@@ -324,7 +324,7 @@ public class NetworkPoliciesIsolatedST extends AbstractST {
         resourceManager.createResource(extensionContext, KafkaTemplates.kafkaWithCruiseControl(clusterName, 3, 3)
             .build());
 
-        resourceManager.createResource(extensionContext, KafkaConnectTemplates.kafkaConnect(clusterName, 1)
+        resourceManager.createResource(extensionContext, KafkaConnectTemplates.kafkaConnect(clusterName, clusterOperator.getDeploymentNamespace(), 1)
                 .build());
 
         List<NetworkPolicy> networkPolicyList = kubeClient().getClient().network().networkPolicies().list().getItems().stream()

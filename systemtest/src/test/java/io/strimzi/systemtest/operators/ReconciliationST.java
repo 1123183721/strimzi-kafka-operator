@@ -53,8 +53,6 @@ import static io.strimzi.systemtest.Constants.CONNECT_COMPONENTS;
 import static io.strimzi.systemtest.Constants.CRUISE_CONTROL;
 import static io.strimzi.systemtest.Constants.REGRESSION;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
-import static org.hamcrest.CoreMatchers.is;
-import static org.hamcrest.MatcherAssert.assertThat;
 
 @Tag(REGRESSION)
 @ParallelSuite
@@ -92,7 +90,7 @@ public class ReconciliationST extends AbstractST {
         RollingUpdateUtils.waitForComponentAndPodsReady(namespaceName, kafkaSelector, SCALE_TO);
 
         LOGGER.info("Deploying KafkaConnect with pause annotation from the start, no pods should appear");
-        resourceManager.createResource(extensionContext, false, KafkaConnectTemplates.kafkaConnectWithFilePlugin(namespaceName, clusterName, 1)
+        resourceManager.createResource(extensionContext, false, KafkaConnectTemplates.kafkaConnectWithFilePlugin(clusterName, namespaceName, 1)
             .editOrNewMetadata()
                 .addToAnnotations(PAUSE_ANNO)
                 .addToAnnotations(Annotations.STRIMZI_IO_USE_CONNECTOR_RESOURCES, "true")
@@ -130,7 +128,7 @@ public class ReconciliationST extends AbstractST {
         String oldConfig = new JsonObject(connectorSpec).getValue("config").toString();
         JsonObject newConfig = new JsonObject(KafkaConnectorUtils.waitForConnectorConfigUpdate(namespaceName, connectPodName, clusterName, oldConfig, "localhost"));
 
-        assertThat(newConfig.getValue("tasks.max"), is(Integer.toString(SCALE_TO)));
+        KafkaConnectorUtils.waitForConnectorsTaskMaxChangeViaAPI(namespaceName, connectPodName, clusterName, SCALE_TO);
     }
 
     @ParallelNamespaceTest
@@ -150,6 +148,9 @@ public class ReconciliationST extends AbstractST {
         final String scraperPodName = kubeClient().listPodsByPrefixInName(namespaceName, scraperName).get(0).getMetadata().getName();
 
         resourceManager.createResource(extensionContext, KafkaTopicTemplates.topic(clusterName, topicName).build());
+
+        // to prevent race condition when reconciliation is paused before KafkaTopic is actually created in Kafka
+        KafkaTopicUtils.waitForTopicWillBePresentInKafka(namespaceName, topicName, KafkaResources.plainBootstrapAddress(clusterName), scraperPodName);
 
         LOGGER.info("Adding pause annotation into KafkaTopic resource and changing replication factor");
         KafkaTopicResource.replaceTopicResourceInSpecificNamespace(topicName, topic -> {

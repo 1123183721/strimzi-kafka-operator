@@ -6,6 +6,7 @@ package io.strimzi.operator.cluster;
 
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
 import io.fabric8.kubernetes.api.model.LocalObjectReferenceBuilder;
+import io.strimzi.operator.cluster.leaderelection.LeaderElectionManagerConfig;
 import io.strimzi.operator.cluster.model.ImagePullPolicy;
 import io.strimzi.operator.cluster.model.KafkaVersion;
 import io.strimzi.operator.cluster.model.UnsupportedVersionException;
@@ -23,6 +24,7 @@ import static java.util.Collections.emptyMap;
 import static java.util.Collections.singleton;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasItems;
@@ -43,7 +45,7 @@ public class ClusterOperatorConfigTest {
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMakerImagesEnvVarString());
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_KAFKA_MIRROR_MAKER_2_IMAGES, KafkaVersionTestUtils.getKafkaMirrorMaker2ImagesEnvVarString());
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_OPERATOR_NAMESPACE, "operator-namespace");
-        ENV_VARS.put(ClusterOperatorConfig.STRIMZI_FEATURE_GATES, "-ControlPlaneListener");
+        ENV_VARS.put(ClusterOperatorConfig.STRIMZI_FEATURE_GATES, "-UseStrimziPodSets");
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_DNS_CACHE_TTL, "10");
         ENV_VARS.put(ClusterOperatorConfig.STRIMZI_POD_SECURITY_PROVIDER_CLASS, "my.package.CustomPodSecurityProvider");
     }
@@ -65,11 +67,13 @@ public class ClusterOperatorConfigTest {
         assertThat(config.getConnectBuildTimeoutMs(), is(ClusterOperatorConfig.DEFAULT_CONNECT_BUILD_TIMEOUT_MS));
         assertThat(config.getOperatorNamespace(), is("operator-namespace"));
         assertThat(config.getOperatorNamespaceLabels(), is(nullValue()));
-        assertThat(config.featureGates().controlPlaneListenerEnabled(), is(true));
+        assertThat(config.featureGates().useStrimziPodSetsEnabled(), is(true));
+        assertThat(config.featureGates().useKRaftEnabled(), is(false));
         assertThat(config.isCreateClusterRoles(), is(false));
         assertThat(config.isNetworkPolicyGeneration(), is(true));
         assertThat(config.isPodSetReconciliationOnly(), is(false));
         assertThat(config.getPodSecurityProviderClass(), is(ClusterOperatorConfig.DEFAULT_POD_SECURITY_PROVIDER_CLASS));
+        assertThat(config.getLeaderElectionConfig(), is(nullValue()));
     }
 
     @Test
@@ -94,7 +98,7 @@ public class ClusterOperatorConfigTest {
                 false,
                 1024,
                 "operator_name",
-                null);
+                null, null);
 
         assertThat(config.getNamespaces(), is(singleton("namespace")));
         assertThat(config.getReconciliationIntervalMs(), is(60_000L));
@@ -113,7 +117,7 @@ public class ClusterOperatorConfigTest {
         assertThat(config.getOperationTimeoutMs(), is(30_000L));
         assertThat(config.getConnectBuildTimeoutMs(), is(40_000L));
         assertThat(config.getOperatorNamespace(), is("operator-namespace"));
-        assertThat(config.featureGates().controlPlaneListenerEnabled(), is(false));
+        assertThat(config.featureGates().useStrimziPodSetsEnabled(), is(false));
         assertThat(config.getDnsCacheTtlSec(), is(10));
         assertThat(config.getPodSecurityProviderClass(), is("my.package.CustomPodSecurityProvider"));
     }
@@ -240,9 +244,9 @@ public class ClusterOperatorConfigTest {
         Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.ENV_VARS);
         envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_POLICY, "Sometimes");
 
-        assertThrows(InvalidConfigurationException.class, () -> {
-            ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup());
-        });
+        assertThrows(InvalidConfigurationException.class, () ->
+            ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup())
+        );
     }
 
     @Test
@@ -262,9 +266,9 @@ public class ClusterOperatorConfigTest {
         Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.ENV_VARS);
         envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_SECRETS, "secret1, secret2 , secret_3 ");
 
-        assertThrows(InvalidConfigurationException.class, () -> {
-            ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup());
-        });
+        assertThrows(InvalidConfigurationException.class, () ->
+            ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup())
+        );
     }
 
     @Test
@@ -272,9 +276,9 @@ public class ClusterOperatorConfigTest {
         Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.ENV_VARS);
         envVars.put(ClusterOperatorConfig.STRIMZI_IMAGE_PULL_SECRETS, "Secret");
 
-        assertThrows(InvalidConfigurationException.class, () -> {
-            ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup());
-        });
+        assertThrows(InvalidConfigurationException.class, () ->
+            ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup())
+        );
     }
 
     @Test
@@ -385,5 +389,16 @@ public class ClusterOperatorConfigTest {
         assertThat(ClusterOperatorConfig.parsePodSecurityProviderClass("RESTRICTED"), is(ClusterOperatorConfig.POD_SECURITY_PROVIDER_RESTRICTED_CLASS));
         assertThat(ClusterOperatorConfig.parsePodSecurityProviderClass("restricted"), is(ClusterOperatorConfig.POD_SECURITY_PROVIDER_RESTRICTED_CLASS));
         assertThat(ClusterOperatorConfig.parsePodSecurityProviderClass("my.package.MyClass"), is("my.package.MyClass"));
+    }
+
+    @Test
+    public void testLeaderElectionConfig() {
+        Map<String, String> envVars = new HashMap<>(ClusterOperatorConfigTest.ENV_VARS);
+        envVars.put(ClusterOperatorConfig.STRIMZI_LEADER_ELECTION_ENABLED, "true");
+        envVars.put(LeaderElectionManagerConfig.ENV_VAR_LEADER_ELECTION_LEASE_NAME, "my-lease");
+        envVars.put(LeaderElectionManagerConfig.ENV_VAR_LEADER_ELECTION_LEASE_NAMESPACE, "my-namespace");
+        envVars.put(LeaderElectionManagerConfig.ENV_VAR_LEADER_ELECTION_IDENTITY, "my-pod");
+
+        assertThat(ClusterOperatorConfig.fromMap(envVars, KafkaVersionTestUtils.getKafkaVersionLookup()).getLeaderElectionConfig(), is(notNullValue()));
     }
 }

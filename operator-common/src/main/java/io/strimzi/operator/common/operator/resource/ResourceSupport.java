@@ -6,6 +6,7 @@ package io.strimzi.operator.common.operator.resource;
 
 import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.KubernetesResourceList;
+import io.fabric8.kubernetes.api.model.ListOptionsBuilder;
 import io.fabric8.kubernetes.client.Watch;
 import io.fabric8.kubernetes.client.Watcher;
 import io.fabric8.kubernetes.client.WatcherException;
@@ -27,12 +28,19 @@ import java.util.List;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
+/**
+ * Utility method for working with Kubernetes resources
+ */
 public class ResourceSupport {
-    public static final long DEFAULT_TIMEOUT_MS = 300_000;
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(ResourceSupport.class);
 
     private final Vertx vertx;
 
+    /**
+     * Constructor
+     *
+     * @param vertx     Vertx instance
+     */
     ResourceSupport(Vertx vertx) {
         this.vertx = vertx;
     }
@@ -265,7 +273,7 @@ public class ResourceSupport {
         return executeBlocking(
             blockingFuture -> {
                 try {
-                    blockingFuture.complete(resource.list().getItems());
+                    blockingFuture.complete(resource.list(new ListOptionsBuilder().withResourceVersion("0").build()).getItems());
                 } catch (Throwable t) {
                     blockingFuture.fail(t);
                 }

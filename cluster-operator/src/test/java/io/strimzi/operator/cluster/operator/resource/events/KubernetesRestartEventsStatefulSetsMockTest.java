@@ -41,7 +41,7 @@ import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
 import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.MockCertManager;
-import io.strimzi.operator.common.operator.resource.AbstractScalableResourceOperator;
+import io.strimzi.operator.common.operator.resource.AbstractScalableNamespacedResourceOperator;
 import io.strimzi.platform.KubernetesVersion;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.mockkube2.MockKube2;
@@ -49,6 +49,7 @@ import io.strimzi.test.mockkube2.controllers.MockPodController;
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import io.vertx.core.WorkerExecutor;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
 import org.junit.jupiter.api.AfterEach;
@@ -56,11 +57,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
-import java.util.Date;
+import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ExecutionException;
-import java.util.function.Supplier;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 
@@ -76,7 +76,7 @@ import static io.strimzi.operator.cluster.model.RestartReason.MANUAL_ROLLING_UPD
 import static io.strimzi.operator.cluster.model.RestartReason.POD_HAS_OLD_GENERATION;
 import static io.strimzi.operator.cluster.model.RestartReason.POD_STUCK;
 import static io.strimzi.operator.common.Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE;
-import static io.strimzi.operator.common.operator.resource.AbstractScalableResourceOperator.ANNO_STRIMZI_IO_GENERATION;
+import static io.strimzi.operator.common.operator.resource.AbstractScalableNamespacedResourceOperator.ANNO_STRIMZI_IO_GENERATION;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
 
@@ -115,10 +115,11 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
     private final ClusterOperatorConfig useStatefulSetsConfig = dummyClusterOperatorConfig("-UseStrimziPodSets");
 
     private KafkaStatus ks;
-    private final Supplier<Date> ds = Date::new;
+    private WorkerExecutor sharedWorkerExecutor;
 
     @BeforeEach
     void setup(Vertx vertx) throws ExecutionException, InterruptedException {
+        sharedWorkerExecutor = vertx.createSharedWorkerExecutor("kubernetes-ops-pool");
         mockKube = new MockKube2.MockKube2Builder(client)
                 .withMockWebServerLoggingSettings(Level.WARNING, true)
                 .withKafkaCrd()
@@ -150,6 +151,7 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
 
     @AfterEach
     void teardown() {
+        sharedWorkerExecutor.close();
         mockKube.stop();
     }
 
@@ -172,8 +174,8 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
         StatefulSet kafkaSet = stsOps().withLabel(appName, "kafka").list().getItems().get(0);
         int statefulSetGen = StatefulSetOperator.getStsGeneration(kafkaSet);
 
-        patchKafkaPodWithAnnotation(AbstractScalableResourceOperator.ANNO_STRIMZI_IO_GENERATION, String.valueOf(statefulSetGen - 1));
-        reconciler.reconcile(ks, ds).onComplete(verifyEventPublished(POD_HAS_OLD_GENERATION, context));
+        patchKafkaPodWithAnnotation(AbstractScalableNamespacedResourceOperator.ANNO_STRIMZI_IO_GENERATION, String.valueOf(statefulSetGen - 1));
+        reconciler.reconcile(ks, Clock.systemUTC()).onComplete(verifyEventPublished(POD_HAS_OLD_GENERATION, context));
     }
 
     @Test
@@ -202,7 +204,7 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
                 vertx
         );
 
-        lowerVolumes.reconcile(ks, ds).onComplete(verifyEventPublished(JBOD_VOLUMES_CHANGED, context));
+        lowerVolumes.reconcile(ks, Clock.systemUTC()).onComplete(verifyEventPublished(JBOD_VOLUMES_CHANGED, context));
     }
 
     @Test
@@ -229,7 +231,7 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
                 PFA,
                 vertx);
 
-        reconciler.reconcile(ks, ds).onComplete(verifyEventPublished(MANUAL_ROLLING_UPDATE, context));
+        reconciler.reconcile(ks, Clock.systemUTC()).onComplete(verifyEventPublished(MANUAL_ROLLING_UPDATE, context));
     }
 
     @Test
@@ -237,7 +239,7 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
         // Change custom listener cert thumbprint annotation to cause reconciliation requiring restart
         patchKafkaPodWithAnnotation(ANNO_STRIMZI_CUSTOM_LISTENER_CERT_THUMBPRINTS, "1234");
 
-        defaultReconciler(vertx).reconcile(ks, ds).onComplete(verifyEventPublished(CUSTOM_LISTENER_CA_CERT_CHANGE, context));
+        defaultReconciler(vertx).reconcile(ks, Clock.systemUTC()).onComplete(verifyEventPublished(CUSTOM_LISTENER_CA_CERT_CHANGE, context));
     }
 
     @Test
@@ -264,7 +266,7 @@ public class KubernetesRestartEventsStatefulSetsMockTest {
 
         podOps().resource(patch).replace();
 
-        defaultReconciler(vertx).reconcile(ks, ds).onComplete(verifyEventPublished(POD_STUCK, context));
+        defaultReconciler(vertx).reconcile(ks, Clock.systemUTC()).onComplete(verifyEventPublished(POD_STUCK, context));
     }
 
     private <T> Handler<AsyncResult<T>> verifyEventPublished(RestartReason expectedReason, VertxTestContext context) {

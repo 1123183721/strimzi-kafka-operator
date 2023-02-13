@@ -17,6 +17,9 @@ import io.strimzi.operator.common.operator.resource.AbstractJsonDiff;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/**
+ * Class for diffing StatefulSets
+ */
 public class StatefulSetDiff extends AbstractJsonDiff {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(StatefulSetDiff.class.getName());
 
@@ -24,6 +27,10 @@ public class StatefulSetDiff extends AbstractJsonDiff {
 
     private static final Pattern IGNORABLE_PATHS = Pattern.compile(
         "^(/metadata/managedFields"
+        + "|/metadata/creationTimestamp"
+        + "|/metadata/resourceVersion"
+        + "|/metadata/generation"
+        + "|/metadata/uid"
         + "|/spec/revisionHistoryLimit"
         + "|/spec/template/metadata/annotations/" + SHORTENED_STRIMZI_DOMAIN + "~1generation"
         + "|/spec/template/spec/initContainers/[0-9]+/resources"
@@ -66,6 +73,13 @@ public class StatefulSetDiff extends AbstractJsonDiff {
     private final boolean changesLabels;
     private final boolean changesSpecReplicas;
 
+    /**
+     * Constructor
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param current           Current StatefulSet
+     * @param desired           Desired StatefulSet
+     */
     public StatefulSetDiff(Reconciliation reconciliation, StatefulSet current, StatefulSet desired) {
         JsonNode source = PATCH_MAPPER.valueToTree(current);
         JsonNode target = PATCH_MAPPER.valueToTree(desired);

@@ -71,6 +71,7 @@ import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.hasProperty;
 
+@SuppressWarnings({"checkstyle:ClassDataAbstractionCoupling"})
 @ParallelSuite
 public class EntityOperatorTest {
     private static final KafkaVersion.Lookup VERSIONS = KafkaVersionTestUtils.getKafkaVersionLookup();
@@ -127,8 +128,7 @@ public class EntityOperatorTest {
         assertThat(dep.getMetadata().getName(), is(KafkaResources.entityOperatorDeploymentName(cluster)));
         assertThat(dep.getMetadata().getNamespace(), is(namespace));
         assertThat(dep.getSpec().getReplicas(), is(EntityOperatorSpec.DEFAULT_REPLICAS));
-        assertThat(dep.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(dep.getMetadata().getOwnerReferences().get(0), is(entityOperator.createOwnerReference()));
+        TestUtils.checkOwnerReference(dep, resource);
 
         assertThat(containers.size(), is(3));
         // just check names of topic and user operators (their containers are tested in the related unit test classes)
@@ -137,10 +137,10 @@ public class EntityOperatorTest {
         // checks on the TLS sidecar container
         Container tlsSidecarContainer = containers.get(2);
         assertThat(tlsSidecarContainer.getImage(), is(image));
-        assertThat(AbstractModel.containerEnvVars(tlsSidecarContainer).get(EntityOperator.ENV_VAR_ZOOKEEPER_CONNECT), is(KafkaResources.zookeeperServiceName(cluster) + ":" + ZookeeperCluster.CLIENT_TLS_PORT));
-        assertThat(AbstractModel.containerEnvVars(tlsSidecarContainer).get(ModelUtils.TLS_SIDECAR_LOG_LEVEL), is(TlsSidecarLogLevel.NOTICE.toValue()));
+        assertThat(io.strimzi.operator.cluster.TestUtils.containerEnvVars(tlsSidecarContainer).get(EntityOperator.ENV_VAR_ZOOKEEPER_CONNECT), is(KafkaResources.zookeeperServiceName(cluster) + ":" + ZookeeperCluster.CLIENT_TLS_PORT));
+        assertThat(io.strimzi.operator.cluster.TestUtils.containerEnvVars(tlsSidecarContainer).get(ModelUtils.TLS_SIDECAR_LOG_LEVEL), is(TlsSidecarLogLevel.NOTICE.toValue()));
         assertThat(EntityOperatorTest.volumeMounts(tlsSidecarContainer.getVolumeMounts()), is(map(
-                        EntityOperator.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
+                        EntityOperator.TLS_SIDECAR_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH,
                         EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_NAME, EntityOperator.TLS_SIDECAR_CA_CERTS_VOLUME_MOUNT,
                         EntityOperator.ETO_CERTS_VOLUME_NAME, EntityOperator.ETO_CERTS_VOLUME_MOUNT)));
         assertThat(tlsSidecarContainer.getReadinessProbe().getInitialDelaySeconds(), is(tlsHealthDelay));
@@ -214,8 +214,8 @@ public class EntityOperatorTest {
     @ParallelTest
     public void withAffinityAndTolerations() throws IOException {
         ResourceTester<Kafka, EntityOperator> helper = new ResourceTester<>(Kafka.class, VERSIONS, (kAssembly, versions) -> EntityOperator.fromCrd(new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()), kAssembly, versions, true), this.getClass().getSimpleName() + ".withAffinityAndTolerations");
-        helper.assertDesiredResource("-DeploymentAffinity.yaml", zc -> zc.generateDeployment(true, null, null).getSpec().getTemplate().getSpec().getAffinity());
-        helper.assertDesiredResource("-DeploymentTolerations.yaml", zc -> zc.generateDeployment(true, null, null).getSpec().getTemplate().getSpec().getTolerations());
+        helper.assertDesiredModel("-DeploymentAffinity.yaml", zc -> zc.generateDeployment(true, null, null).getSpec().getTemplate().getSpec().getAffinity());
+        helper.assertDesiredModel("-DeploymentTolerations.yaml", zc -> zc.generateDeployment(true, null, null).getSpec().getTemplate().getSpec().getTolerations());
     }
 
     @ParallelTest
@@ -232,6 +232,12 @@ public class EntityOperatorTest {
 
         Map<String, String> saLabels = TestUtils.map("l5", "v5", "l6", "v6");
         Map<String, String> saAnnotations = TestUtils.map("a5", "v5", "a6", "v6");
+
+        Map<String, String> rLabels = TestUtils.map("l7", "v7", "l8", "v8");
+        Map<String, String> rAnots = TestUtils.map("a7", "v7", "a8", "v8");
+
+        Map<String, String> rbLabels = TestUtils.map("l9", "v9", "l10", "v10");
+        Map<String, String> rbAnots = TestUtils.map("a9", "v9", "a10", "v10");
 
         Toleration toleration = new TolerationBuilder()
                 .withEffect("NoSchedule")
@@ -281,6 +287,12 @@ public class EntityOperatorTest {
                                         .withTopologySpreadConstraints(tsc1, tsc2)
                                         .withEnableServiceLinks(false)
                                     .endPod()
+                                    .withNewEntityOperatorRole()
+                                        .withNewMetadata()
+                                            .withLabels(rLabels)
+                                            .withAnnotations(rAnots)
+                                        .endMetadata()
+                                    .endEntityOperatorRole()
                                     .withNewServiceAccount()
                                         .withNewMetadata()
                                             .withLabels(saLabels)
@@ -306,6 +318,11 @@ public class EntityOperatorTest {
         assertThat(dep.getSpec().getTemplate().getSpec().getTopologySpreadConstraints(), containsInAnyOrder(tsc1, tsc2));
         assertThat(dep.getSpec().getTemplate().getSpec().getEnableServiceLinks(), is(false));
         assertThat(dep.getSpec().getTemplate().getSpec().getTolerations(), is(singletonList(assertToleration)));
+
+        // Generate Role metadata
+        Role crb = entityOperator.generateRole(null, namespace);
+        assertThat(crb.getMetadata().getLabels().entrySet().containsAll(rLabels.entrySet()), is(true));
+        assertThat(crb.getMetadata().getAnnotations().entrySet().containsAll(rAnots.entrySet()), is(true));
 
         // Check Service Account
         ServiceAccount sa = entityOperator.generateServiceAccount();
@@ -521,7 +538,7 @@ public class EntityOperatorTest {
                     .endKafka()
                 .endSpec()
                 .build();
-        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is("foo1"));
+        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).createContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is("foo1"));
 
         kafka = new KafkaBuilder(resource)
                 .editSpec()
@@ -535,7 +552,7 @@ public class EntityOperatorTest {
                     .endKafka()
                 .endSpec()
                 .build();
-        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is("foo2"));
+        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).createContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is("foo2"));
 
         kafka = new KafkaBuilder(resource)
                 .editSpec()
@@ -550,7 +567,7 @@ public class EntityOperatorTest {
                     .endKafka()
                 .endSpec()
             .build();
-        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is(KafkaVersionTestUtils.DEFAULT_KAFKA_IMAGE));
+        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).createContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is(KafkaVersionTestUtils.DEFAULT_KAFKA_IMAGE));
 
         kafka = new KafkaBuilder(resource)
                 .editSpec()
@@ -565,7 +582,7 @@ public class EntityOperatorTest {
                     .endKafka()
                 .endSpec()
             .build();
-        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).getContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is(KafkaVersionTestUtils.DEFAULT_KAFKA_IMAGE));
+        assertThat(EntityOperator.fromCrd(new Reconciliation("test", kafka.getKind(), kafka.getMetadata().getNamespace(), kafka.getMetadata().getName()), kafka, VERSIONS, true).createContainers(ImagePullPolicy.ALWAYS).get(2).getImage(), is(KafkaVersionTestUtils.DEFAULT_KAFKA_IMAGE));
     }
 
     @ParallelTest
@@ -1033,7 +1050,7 @@ public class EntityOperatorTest {
         EntityOperator eo =  EntityOperator.fromCrd(new Reconciliation("test", resource.getKind(), resource.getMetadata().getNamespace(), resource.getMetadata().getName()), resource, VERSIONS, true);
         Role role = eo.generateRole(namespace, namespace);
 
-        assertThat(role.getMetadata().getOwnerReferences().get(0), is(entityOperator.createOwnerReference()));
+        TestUtils.checkOwnerReference(role, resource);
 
         role = eo.generateRole(namespace, "some-other-namespace");
         assertThat(role.getMetadata().getOwnerReferences().size(), is(0));

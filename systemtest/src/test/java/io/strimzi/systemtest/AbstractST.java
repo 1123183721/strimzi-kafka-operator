@@ -8,6 +8,7 @@ import io.fabric8.kubernetes.api.model.Container;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Quantity;
+import io.fabric8.kubernetes.api.model.Service;
 import io.strimzi.api.kafka.Crds;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaResources;
@@ -110,13 +111,13 @@ public abstract class AbstractST implements TestSeparator {
 
     public static Random rng = new Random();
 
-    public static final int MESSAGE_COUNT = 100;
+    public static final int MESSAGE_COUNT = Constants.MESSAGE_COUNT;
     public static final String USER_NAME = KafkaUserUtils.generateRandomNameOfKafkaUser();
     public static final String TOPIC_NAME = KafkaTopicUtils.generateRandomNameOfTopic();
 
     protected void assertResources(String namespace, String podName, String containerName, String memoryLimit, String cpuLimit, String memoryRequest, String cpuRequest) {
         Pod po = kubeClient(namespace).getPod(namespace, podName);
-        assertThat("Not found an expected pod  " + podName + " in namespace " + namespace + " but found " +
+        assertThat("Not found an expected Pod  " + namespace + "/" + podName + " but found " +
             kubeClient(namespace).listPods(namespace).stream().map(p -> p.getMetadata().getName()).collect(Collectors.toList()), po, is(notNullValue()));
 
         Optional optional = po.getSpec().getContainers().stream().filter(c -> c.getName().equals(containerName)).findFirst();
@@ -206,10 +207,6 @@ public abstract class AbstractST implements TestSeparator {
         }
     }
 
-    protected void checkComponentConfiguration(String podNamePrefix, String containerName, String configKey, Map<String, Object> config) {
-        checkComponentConfiguration(kubeClient().getNamespace(), podNamePrefix, containerName, configKey, config);
-    }
-
     /**
      * Verifies container environment variables passed as a map.
      * @param namespaceName Namespace name where container is located
@@ -233,10 +230,6 @@ public abstract class AbstractST implements TestSeparator {
         } else {
             fail("Pod with prefix " + podNamePrefix + " in name, not found");
         }
-    }
-
-    protected void checkSpecificVariablesInContainer(String podNamePrefix, String containerName, Map<String, String> config) {
-        checkSpecificVariablesInContainer(kubeClient().getNamespace(), podNamePrefix, containerName, config);
     }
 
     /**
@@ -278,12 +271,6 @@ public abstract class AbstractST implements TestSeparator {
         } else {
             fail("Pod with prefix " + podNamePrefix + " in name, not found");
         }
-    }
-
-    protected void checkReadinessLivenessProbe(String podNamePrefix, String containerName, int initialDelaySeconds, int timeoutSeconds,
-                                               int periodSeconds, int successThreshold, int failureThreshold) {
-        checkReadinessLivenessProbe(kubeClient().getNamespace(), podNamePrefix, containerName, initialDelaySeconds,
-            timeoutSeconds, periodSeconds, successThreshold, failureThreshold);
     }
 
     protected void verifyLabelsForKafkaCluster(String clusterOperatorNamespaceName, String componentsNamespaceName, String clusterName, String appName) {
@@ -352,19 +339,18 @@ public abstract class AbstractST implements TestSeparator {
         }
     }
 
-    protected void verifyLabelsForService(String namespaceName, String clusterName, String serviceToTest, String kind) {
+    protected void verifyLabelsForService(String namespaceName, String clusterName, String nameLabel, String serviceToTest, String kind) {
         LOGGER.info("Verifying labels for Kafka Connect Services");
 
         String serviceName = clusterName.concat("-").concat(serviceToTest);
-        kubeClient(namespaceName).listServices().stream()
-            .filter(service -> service.getMetadata().getName().equals(serviceName))
-            .forEach(service -> {
-                LOGGER.info("Verifying labels for service {}", service.getMetadata().getName());
-                assertThat(service.getMetadata().getLabels().get(Labels.STRIMZI_CLUSTER_LABEL), is(clusterName));
-                assertThat(service.getMetadata().getLabels().get(Labels.STRIMZI_KIND_LABEL), is(kind));
-                assertThat(service.getMetadata().getLabels().get(Labels.STRIMZI_NAME_LABEL), is(serviceName));
-            }
-        );
+        Service service = kubeClient(namespaceName).getService(serviceName);
+
+        assertThat(service, is(notNullValue()));
+
+        LOGGER.info("Verifying labels for service {}", service.getMetadata().getName());
+        assertThat(service.getMetadata().getLabels().get(Labels.STRIMZI_CLUSTER_LABEL), is(clusterName));
+        assertThat(service.getMetadata().getLabels().get(Labels.STRIMZI_KIND_LABEL), is(kind));
+        assertThat(service.getMetadata().getLabels().get(Labels.STRIMZI_NAME_LABEL), is(clusterName.concat("-").concat(nameLabel)));
     }
 
     void verifyLabelsForSecrets(String namespaceName, String clusterName, String appName) {
@@ -478,10 +464,6 @@ public abstract class AbstractST implements TestSeparator {
         LOGGER.info("Search in strimzi-cluster-operator log for errors in last {} seconds", sinceSeconds);
         String clusterOperatorLog = cmdKubeClient(namespaceName).searchInLog("deploy", ResourceManager.getCoDeploymentName(), sinceSeconds, "Exception", "Error", "Throwable");
         assertThat(clusterOperatorLog, logHasNoUnexpectedErrors());
-    }
-
-    protected void assertNoCoErrorsLogged(long sinceSeconds) {
-        assertNoCoErrorsLogged(kubeClient().getNamespace(), sinceSeconds);
     }
 
     protected void testDockerImagesForKafkaCluster(String clusterName, String clusterOperatorNamespaceName, String kafkaNamespaceName,
@@ -672,7 +654,7 @@ public abstract class AbstractST implements TestSeparator {
     @BeforeEach
     void setUpTestCase(ExtensionContext extensionContext) {
         LOGGER.debug(String.join("", Collections.nCopies(76, "=")));
-        LOGGER.debug("[{} - Before Each] - Setup test case environment", StUtils.removePackageName(this.getClass().getName()));
+        LOGGER.debug("————————————  {}@efore Each - Setup test case environment ———————————— ", StUtils.removePackageName(this.getClass().getName()));
         beforeEachMustExecute(extensionContext);
         beforeEachMayOverride(extensionContext);
     }
@@ -680,7 +662,7 @@ public abstract class AbstractST implements TestSeparator {
     @BeforeAll
     void setUpTestSuite(ExtensionContext extensionContext) {
         LOGGER.debug(String.join("", Collections.nCopies(76, "=")));
-        LOGGER.debug("[{} - Before All] - Setup test suite environment", StUtils.removePackageName(this.getClass().getName()));
+        LOGGER.debug("———————————— {}@Before All - Setup test suite environment ———————————— ", StUtils.removePackageName(this.getClass().getName()));
         beforeAllMayOverride(extensionContext);
         beforeAllMustExecute(extensionContext);
     }
@@ -688,7 +670,7 @@ public abstract class AbstractST implements TestSeparator {
     @AfterEach
     void tearDownTestCase(ExtensionContext extensionContext) throws Exception {
         LOGGER.debug(String.join("", Collections.nCopies(76, "=")));
-        LOGGER.debug("[{} - After Each] - Clean up after test", StUtils.removePackageName(this.getClass().getName()));
+        LOGGER.debug("———————————— {}@After Each - Clean up after test ————————————", StUtils.removePackageName(this.getClass().getName()));
         // try with finally is needed because in worst case possible if the Cluster is unable to delete namespaces, which
         // results in `Timeout after 480000 ms waiting for Namespace namespace-136 removal` it throws WaitException and
         // does not proceed with the next method (i.e., afterEachMustExecute()). This ensures that if such problem happen
@@ -703,7 +685,7 @@ public abstract class AbstractST implements TestSeparator {
     @AfterAll
     void tearDownTestSuite(ExtensionContext extensionContext) throws Exception {
         LOGGER.debug(String.join("", Collections.nCopies(76, "=")));
-        LOGGER.debug("[{} - After All] - Clean up after test suite", StUtils.removePackageName(this.getClass().getName()));
+        LOGGER.debug("———————————— {}@After All - Clean up after test suite ———————————— ", StUtils.removePackageName(this.getClass().getName()));
         afterAllMayOverride(extensionContext);
         afterAllMustExecute(extensionContext);
     }

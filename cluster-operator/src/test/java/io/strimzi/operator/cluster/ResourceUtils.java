@@ -45,35 +45,28 @@ import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.storage.EphemeralStorage;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
-import io.strimzi.operator.cluster.model.AbstractModel;
 import io.strimzi.operator.cluster.model.Ca;
-import io.strimzi.operator.cluster.model.ClientsCa;
-import io.strimzi.operator.cluster.model.ClusterCa;
-import io.strimzi.operator.cluster.model.KafkaCluster;
 import io.strimzi.operator.cluster.model.KafkaVersion;
+import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
-import io.strimzi.operator.cluster.operator.resource.events.KubernetesRestartEventPublisher;
-import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
+import io.strimzi.operator.cluster.operator.resource.ZookeeperLeaderFinder;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScaler;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScalerProvider;
+import io.strimzi.operator.cluster.operator.resource.events.KubernetesRestartEventPublisher;
 import io.strimzi.operator.common.AdminClientProvider;
-import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
-import io.strimzi.operator.cluster.operator.resource.ZookeeperLeaderFinder;
 import io.strimzi.operator.common.BackOff;
 import io.strimzi.operator.common.MetricsProvider;
 import io.strimzi.operator.common.MicrometerMetricsProvider;
-import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
-import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.BuildConfigOperator;
 import io.strimzi.operator.common.operator.resource.BuildOperator;
 import io.strimzi.operator.common.operator.resource.ClusterRoleBindingOperator;
 import io.strimzi.operator.common.operator.resource.ConfigMapOperator;
 import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.operator.common.operator.resource.DeploymentOperator;
+import io.strimzi.operator.common.operator.resource.ImageStreamOperator;
 import io.strimzi.operator.common.operator.resource.IngressOperator;
-import io.strimzi.operator.common.operator.resource.IngressV1Beta1Operator;
 import io.strimzi.operator.common.operator.resource.NetworkPolicyOperator;
 import io.strimzi.operator.common.operator.resource.NodeOperator;
 import io.strimzi.operator.common.operator.resource.PodDisruptionBudgetOperator;
@@ -87,6 +80,7 @@ import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
 import io.strimzi.operator.common.operator.resource.StorageClassOperator;
+import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
 import io.strimzi.test.TestUtils;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
@@ -108,13 +102,11 @@ import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.function.Function;
 
 import static java.util.Collections.emptyMap;
 import static java.util.Collections.singleton;
@@ -204,26 +196,37 @@ public class ResourceUtils {
                 .build();
     }
 
-    public static List<Secret> createKafkaInitialSecrets(String namespace, String name) {
-        List<Secret> secrets = new ArrayList<>();
-        secrets.add(createInitialCaCertSecret(namespace, name,
-                AbstractModel.clusterCaCertSecretName(name), MockCertManager.clusterCaCert(), MockCertManager.clusterCaCertStore(), "123456"));
-        secrets.add(createInitialCaKeySecret(namespace, name,
-                AbstractModel.clusterCaKeySecretName(name), MockCertManager.clusterCaKey()));
-        return secrets;
-    }
-
-    public static ClusterCa createInitialClusterCa(Reconciliation reconciliation, String clusterName, Secret initialClusterCaCert, Secret initialClusterCaKey) {
-        return new ClusterCa(reconciliation, new MockCertManager(), new PasswordGenerator(10, "a", "a"), clusterName, initialClusterCaCert, initialClusterCaKey);
-    }
-
-    public static ClientsCa createInitialClientsCa(Reconciliation reconciliation, String clusterName, Secret initialClientsCaCert, Secret initialClientsCaKey) {
-        return new ClientsCa(reconciliation, new MockCertManager(),
-                new PasswordGenerator(10, "a", "a"),
-                KafkaResources.clientsCaCertificateSecretName(clusterName),
-                initialClientsCaCert,
-                KafkaResources.clientsCaKeySecretName(clusterName),
-                initialClientsCaKey, 365, 30, true, null);
+    /**
+     * Create a mock Secret for brokers certificates that uses the same cert and key for each replica
+     * @param clusterNamespace Namespace of the Kafka cluster
+     * @param clusterName Kafka cluster name
+     * @param replicas Number of broker replicas
+     * @param secretName Name of the secret
+     * @param brokerCert Broker x509 certificate
+     * @param brokerKey Broker private key
+     * @param p12KeyStore P12 keystore for cert & key
+     * @param p12KeyStorePassword P12 keystore password
+     * @return A Secret object
+     */
+    public static Secret createMockBrokersCertsSecret(String clusterNamespace, String clusterName, int replicas, String secretName,
+                                                      String brokerCert, String brokerKey, String p12KeyStore, String p12KeyStorePassword) {
+        Map<String, String> data = new HashMap<>((int) (1 + replicas * 4 / 0.75));
+        for (int i = 0; i < replicas; i++) {
+            data.put(Ca.secretEntryNameForPod(KafkaResources.kafkaPodName(clusterName, i), Ca.SecretEntry.KEY), brokerKey);
+            data.put(Ca.secretEntryNameForPod(KafkaResources.kafkaPodName(clusterName, i), Ca.SecretEntry.CRT), brokerCert);
+            data.put(Ca.secretEntryNameForPod(KafkaResources.kafkaPodName(clusterName, i), Ca.SecretEntry.P12_KEYSTORE), p12KeyStore);
+            data.put(Ca.secretEntryNameForPod(KafkaResources.kafkaPodName(clusterName, i), Ca.SecretEntry.P12_KEYSTORE_PASSWORD), p12KeyStorePassword);
+        }
+        return new SecretBuilder()
+                .withNewMetadata()
+                    .withName(secretName)
+                    .withNamespace(clusterNamespace)
+                    .addToAnnotations(Ca.ANNO_STRIMZI_IO_CA_CERT_GENERATION, "0")
+                    .addToAnnotations(Ca.ANNO_STRIMZI_IO_CLIENTS_CA_CERT_GENERATION, "0")
+                    .withLabels(Labels.forStrimziCluster(clusterName).withStrimziKind(Kafka.RESOURCE_KIND).toMap())
+                .endMetadata()
+                .addToData(data)
+                .build();
     }
 
     public static Secret createInitialCaCertSecret(String clusterNamespace, String clusterName, String secretName,
@@ -251,83 +254,6 @@ public class ResourceUtils {
                 .endMetadata()
                 .addToData("ca.key", caKey)
                 .build();
-    }
-
-    public static List<Secret> createKafkaSecretsWithReplicas(String namespace, String name, int kafkaReplicas, int zkReplicas) {
-        List<Secret> secrets = new ArrayList<>();
-
-        secrets.add(createInitialCaKeySecret(namespace, name,
-                AbstractModel.clusterCaKeySecretName(name), MockCertManager.clusterCaKey()));
-        secrets.add(createInitialCaCertSecret(namespace, name,
-                AbstractModel.clusterCaCertSecretName(name), MockCertManager.clusterCaCert(), MockCertManager.clusterCaCertStore(), "123456"));
-
-        secrets.add(
-                new SecretBuilder()
-                        .withNewMetadata()
-                        .withName(KafkaResources.clientsCaKeySecretName(name))
-                        .withNamespace(namespace)
-                        .withLabels(Labels.forStrimziCluster(name).toMap())
-                        .endMetadata()
-                        .addToData("clients-ca.key", MockCertManager.clientsCaKey())
-                        .addToData("clients-ca.crt", MockCertManager.clientsCaCert())
-                        .build()
-        );
-
-        secrets.add(
-                new SecretBuilder()
-                        .withNewMetadata()
-                        .withName(KafkaResources.clientsCaCertificateSecretName(name))
-                        .withNamespace(namespace)
-                        .withLabels(Labels.forStrimziCluster(name).toMap())
-                        .endMetadata()
-                        .addToData("clients-ca.crt", MockCertManager.clientsCaCert())
-                        .build()
-        );
-
-        SecretBuilder builder =
-                new SecretBuilder()
-                        .withNewMetadata()
-                        .withName(KafkaResources.kafkaSecretName(name))
-                        .withNamespace(namespace)
-                        .withLabels(Labels.forStrimziCluster(name).toMap())
-                        .endMetadata()
-                        .addToData("cluster-ca.crt", MockCertManager.clusterCaCert());
-
-        for (int i = 0; i < kafkaReplicas; i++) {
-            builder.addToData(KafkaResources.kafkaPodName(name, i) + ".key", Base64.getEncoder().encodeToString("brokers-internal-base64key".getBytes()))
-                    .addToData(KafkaResources.kafkaPodName(name, i) + ".crt", Base64.getEncoder().encodeToString("brokers-internal-base64crt".getBytes()));
-        }
-        secrets.add(builder.build());
-
-        builder = new SecretBuilder()
-                        .withNewMetadata()
-                            .withName(KafkaCluster.clusterCaCertSecretName(name))
-                            .withNamespace(namespace)
-                            .withLabels(Labels.forStrimziCluster(name).toMap())
-                        .endMetadata()
-                        .addToData("ca.crt", Base64.getEncoder().encodeToString("cluster-ca-base64crt".getBytes()));
-
-        for (int i = 0; i < kafkaReplicas; i++) {
-            builder.addToData(KafkaResources.kafkaPodName(name, i) + ".key", Base64.getEncoder().encodeToString("brokers-clients-base64key".getBytes()))
-                    .addToData(KafkaResources.kafkaPodName(name, i) + ".crt", Base64.getEncoder().encodeToString("brokers-clients-base64crt".getBytes()));
-        }
-        secrets.add(builder.build());
-
-        builder = new SecretBuilder()
-                        .withNewMetadata()
-                            .withName(KafkaResources.zookeeperSecretName(name))
-                            .withNamespace(namespace)
-                            .withLabels(Labels.forStrimziCluster(name).toMap())
-                        .endMetadata()
-                        .addToData("cluster-ca.crt", Base64.getEncoder().encodeToString("cluster-ca-base64crt".getBytes()));
-
-        for (int i = 0; i < zkReplicas; i++) {
-            builder.addToData(KafkaResources.zookeeperPodName(name, i) + ".key", Base64.getEncoder().encodeToString("nodes-base64key".getBytes()))
-                    .addToData(KafkaResources.zookeeperPodName(name, i) + ".crt", Base64.getEncoder().encodeToString("nodes-base64crt".getBytes()));
-        }
-        secrets.add(builder.build());
-
-        return secrets;
     }
 
     public static Kafka createKafka(String namespace, String name, int replicas,
@@ -636,16 +562,10 @@ public class ResourceUtils {
     }
 
     public static ZookeeperScalerProvider zookeeperScalerProvider() {
-        return new ZookeeperScalerProvider() {
-            @Override
-            public ZookeeperScaler createZookeeperScaler(
-                    Reconciliation reconciliation, Vertx vertx, String zookeeperConnectionString,
-                    Function<Integer, String> zkNodeAddress, Secret clusterCaCertSecret, Secret coKeySecret,
-                    long operationTimeoutMs, int zkAdminSessionTimoutMs) {
-                ZookeeperScaler mockZooScaler = mock(ZookeeperScaler.class);
-                when(mockZooScaler.scale(anyInt())).thenReturn(Future.succeededFuture());
-                return mockZooScaler;
-            }
+        return (reconciliation, vertx, zookeeperConnectionString, zkNodeAddress, clusterCaCertSecret, coKeySecret, operationTimeoutMs, zkAdminSessionTimoutMs) -> {
+            ZookeeperScaler mockZooScaler = mock(ZookeeperScaler.class);
+            when(mockZooScaler.scale(anyInt())).thenReturn(Future.succeededFuture());
+            return mockZooScaler;
         };
     }
 
@@ -656,10 +576,12 @@ public class ResourceUtils {
     @SuppressWarnings("unchecked")
     public static ResourceOperatorSupplier supplierWithMocks(boolean openShift) {
         RouteOperator routeOps = openShift ? mock(RouteOperator.class) : null;
+        ImageStreamOperator imageOps = openShift ? mock(ImageStreamOperator.class) : null;
 
         ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(
                 mock(ServiceOperator.class),
                 routeOps,
+                imageOps,
                 mock(StatefulSetOperator.class),
                 mock(ConfigMapOperator.class),
                 mock(SecretOperator.class),
@@ -674,7 +596,6 @@ public class ResourceUtils {
                 mock(PodDisruptionBudgetV1Beta1Operator.class),
                 mock(PodOperator.class),
                 mock(IngressOperator.class),
-                mock(IngressV1Beta1Operator.class),
                 mock(BuildConfigOperator.class),
                 mock(BuildOperator.class),
                 mock(CrdOperator.class),
@@ -749,7 +670,7 @@ public class ResourceUtils {
                 false,
                 1024,
                 "cluster-operator-name",
-                ClusterOperatorConfig.DEFAULT_POD_SECURITY_PROVIDER_CLASS);
+                ClusterOperatorConfig.DEFAULT_POD_SECURITY_PROVIDER_CLASS, null);
     }
 
     public static ClusterOperatorConfig dummyClusterOperatorConfig(KafkaVersion.Lookup versions, long operationTimeoutMs) {

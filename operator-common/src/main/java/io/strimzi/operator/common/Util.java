@@ -31,6 +31,7 @@ import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
+import java.time.Instant;
 import org.apache.kafka.common.KafkaFuture;
 import org.apache.kafka.common.config.ConfigResource;
 import org.quartz.CronExpression;
@@ -68,10 +69,28 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+/**
+ * Class with various utility methods
+ */
 @SuppressWarnings({"checkstyle:ClassFanOutComplexity"})
 public class Util {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(Util.class);
 
+    /**
+     * Length of a hash stub. One example usage is when generating an annotation with a certificate short thumbprint.
+     */
+    public static final int HASH_STUB_LENGTH = 8;
+
+    /**
+     * Executes blocking code asynchronously
+     *
+     * @param vertx     Vert.x instance
+     * @param supplier  Supplier with the blocking code
+     *
+     * @return  Future for returning the result
+     *
+     * @param <T>   Type of the result
+     */
     public static <T> Future<T> async(Vertx vertx, Supplier<T> supplier) {
         Promise<T> result = Promise.promise();
         vertx.executeBlocking(
@@ -169,7 +188,13 @@ public class Util {
         return promise.future();
     }
 
-    // Wrapper to minimise usage of raw types in code using composite futures
+    /**
+     * Wrapper to minimise usage of raw types in code using composite futures
+     *
+     * @param futures   List of futures
+     *
+     * @return  Composite future based on a list of futures
+     */
     @SuppressWarnings({"unchecked", "rawtypes"})
     public static CompositeFuture compositeFuture(List<?> futures) {
         return CompositeFuture.join((List<Future>) futures);
@@ -229,7 +254,7 @@ public class Util {
     public static File createFileStore(String prefix, String suffix, byte[] bytes) {
         File f = null;
         try {
-            f = File.createTempFile(prefix, suffix);
+            f = Files.createTempFile(prefix, suffix).toFile();
             f.deleteOnExit();
             try (OutputStream os = new BufferedOutputStream(new FileOutputStream(f))) {
                 os.write(bytes);
@@ -272,7 +297,7 @@ public class Util {
 
             int aliasIndex = 0;
             for (X509Certificate certificate : certificates) {
-                trustStore.setEntry(certificate.getSubjectDN().getName() + "-" + aliasIndex, new KeyStore.TrustedCertificateEntry(certificate), null);
+                trustStore.setEntry(certificate.getSubjectX500Principal().getName() + "-" + aliasIndex, new KeyStore.TrustedCertificateEntry(certificate), null);
                 aliasIndex++;
             }
 
@@ -285,7 +310,7 @@ public class Util {
     private static File store(String prefix, String suffix, KeyStore trustStore, char[] password) throws Exception {
         File f = null;
         try {
-            f = File.createTempFile(prefix, suffix);
+            f = Files.createTempFile(prefix, suffix).toFile();
             f.deleteOnExit();
             try (OutputStream os = new BufferedOutputStream(new FileOutputStream(f))) {
                 trustStore.store(os, password);
@@ -375,10 +400,17 @@ public class Util {
         return merged;
     }
 
-    public static <T> Future<T> kafkaFutureToVertxFuture(Vertx vertx, KafkaFuture<T> kf) {
-        return kafkaFutureToVertxFuture(null, vertx, kf);
-    }
-
+    /**
+     * Converts Kafka Future to VErt.x future
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param vertx             Vert.x instnce
+     * @param kf                Kafka future
+     *
+     * @return  Vert.x future based on the Kafka future
+     *
+     * @param <T>   Return type of the future
+     */
     public static <T> Future<T> kafkaFutureToVertxFuture(Reconciliation reconciliation, Vertx vertx, KafkaFuture<T> kf) {
         Promise<T> promise = Promise.promise();
         if (kf != null) {
@@ -403,18 +435,46 @@ public class Util {
         }
     }
 
+    /**
+     * Created config resource instance
+     *
+     * @param podId Pod ID
+     *
+     * @return  Config resource
+     */
     public static ConfigResource getBrokersConfig(int podId) {
         return Util.getBrokersConfig(Integer.toString(podId));
     }
 
+    /**
+     * Created config resource instance
+     *
+     * @param podId Pod ID
+     *
+     * @return  Config resource
+     */
     public static ConfigResource getBrokersLogging(int podId) {
         return Util.getBrokersLogging(Integer.toString(podId));
     }
 
+    /**
+     * Created config resource instance
+     *
+     * @param podId Pod ID
+     *
+     * @return  Config resource
+     */
     public static ConfigResource getBrokersConfig(String podId) {
         return new ConfigResource(ConfigResource.Type.BROKER, podId);
     }
 
+    /**
+     * Created config resource instance
+     *
+     * @param podId Pod ID
+     *
+     * @return  Config resource
+     */
     public static ConfigResource getBrokersLogging(String podId) {
         return new ConfigResource(ConfigResource.Type.BROKER_LOGGER, podId);
     }
@@ -497,21 +557,38 @@ public class Util {
      * Gets the first 8 characters from a SHA-1 hash of the provided byte array
      *
      * @param   toBeHashed  Byte array for which the hash will be returned
-     *
      * @return              First 8 characters of the SHA-1 hash
      */
     public static String hashStub(byte[] toBeHashed)   {
+        byte[] digest = sha1Digest(toBeHashed);
+        return String.format("%040x", new BigInteger(1, digest)).substring(0, HASH_STUB_LENGTH);
+    }
+
+    /**
+     * Get a SHA-1 hash of the provided byte array
+     *
+     * @param toBeHashed    Byte array for which the hash will be returned
+     * @return              SHA-1 hash
+     */
+    public static byte[] sha1Digest(byte[] toBeHashed) {
         try {
             // This is used to generate unique identifier which is not used for security => using SHA-1 is ok
             MessageDigest sha1 = MessageDigest.getInstance("SHA-1");
-            byte[] digest = sha1.digest(toBeHashed);
-
-            return String.format("%040x", new BigInteger(1, digest)).substring(0, 8);
+            return sha1.digest(toBeHashed);
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("Failed to get SHA-1 hash", e);
         }
     }
 
+    /**
+     * Gets a config map with external logging configuration
+     *
+     * @param configMapOperations   Config Map operator
+     * @param namespace             Namespace of operand which uses the logging
+     * @param logging               Logging configuration from the CR
+     *
+     * @return  Future with the external logging Config Map
+     */
     public static Future<ConfigMap> getExternalLoggingCm(ConfigMapOperator configMapOperations, String namespace, ExternalLogging logging) {
         Future<ConfigMap> loggingCmFut;
         if (logging.getValueFrom() != null
@@ -594,6 +671,17 @@ public class Util {
         return Future.succeededFuture(0);
     }
 
+    /**
+     * Creates a Metrics and Logging holder based on the operand logging configuration
+     *
+     * @param reconciliation        Reconciliation marker
+     * @param configMapOperations   ConfigMap operator
+     * @param namespace             Namespace of the operand and Config Maps
+     * @param logging               Logging configuration
+     * @param metricsConfigInCm     Metrics configuration
+     *
+     * @return  Future with the metrics and logging configuration holder
+     */
     public static Future<MetricsAndLogging> metricsAndLogging(Reconciliation reconciliation,
                                                               ConfigMapOperator configMapOperations,
                                                               String namespace,
@@ -639,6 +727,11 @@ public class Util {
         return true;
     }
 
+    /**
+     * Deleted a file from the filesystem
+     *
+     * @param key   Path to the file which should be deleted
+     */
     public static void delete(Path key) {
         if (key != null) {
             try {
@@ -736,27 +829,26 @@ public class Util {
     }
 
     /**
-     * Checks whether maintenance time window is satisfied or not
+     * Checks whether maintenance time window is satisfied by a given point in time or not
      *
      * @param reconciliation        Reconciliation marker
      * @param maintenanceWindows    List of maintenance windows
-     * @param dateSupplier          Date supplier
+     * @param instant               The point in time to check the maintenance windows against
      *
      * @return                      True if we are in a maintenance window or if no maintenance windows are defined. False otherwise.
      */
-    public static boolean isMaintenanceTimeWindowsSatisfied(Reconciliation reconciliation, List<String> maintenanceWindows, Supplier<Date> dateSupplier) {
+    public static boolean isMaintenanceTimeWindowsSatisfied(Reconciliation reconciliation, List<String> maintenanceWindows, Instant instant) {
         String currentCron = null;
         try {
             boolean isSatisfiedBy = maintenanceWindows == null || maintenanceWindows.isEmpty();
             if (!isSatisfiedBy) {
-                Date date = dateSupplier.get();
                 for (String cron : maintenanceWindows) {
                     currentCron = cron;
                     CronExpression cronExpression = new CronExpression(cron);
                     // the user defines the cron expression in "UTC/GMT" timezone but CO pod
                     // can be running on a different one, so setting it on the cron expression
                     cronExpression.setTimeZone(TimeZone.getTimeZone("GMT"));
-                    if (cronExpression.isSatisfiedBy(date)) {
+                    if (cronExpression.isSatisfiedBy(Date.from(instant))) {
                         isSatisfiedBy = true;
                         break;
                     }

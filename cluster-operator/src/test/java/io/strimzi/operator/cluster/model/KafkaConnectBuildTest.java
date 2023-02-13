@@ -32,6 +32,7 @@ import java.util.Map;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.notNullValue;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -96,9 +97,9 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        assertThrows(InvalidResourceException.class, () -> {
-            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
-        });
+        assertThrows(InvalidResourceException.class, () ->
+            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS)
+        );
     }
 
     @ParallelTest
@@ -120,9 +121,9 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        assertThrows(InvalidResourceException.class, () -> {
-            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
-        });
+        assertThrows(InvalidResourceException.class, () ->
+            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS)
+        );
     }
 
     @ParallelTest
@@ -145,9 +146,9 @@ public class KafkaConnectBuildTest {
                 .endSpec()
                 .build();
 
-        assertThrows(InvalidResourceException.class, () -> {
-            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
-        });
+        assertThrows(InvalidResourceException.class, () ->
+            KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS)
+        );
     }
 
     @ParallelTest
@@ -184,14 +185,15 @@ public class KafkaConnectBuildTest {
 
         assertThat(build.baseImage, is("my-source-image:latest"));
 
-        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
+        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, "cf065b80ede090aa");
         assertThat(pod.getMetadata().getName(), is(KafkaConnectResources.buildPodName(cluster)));
         assertThat(pod.getMetadata().getNamespace(), is(namespace));
 
         Map<String, String> expectedDeploymentLabels = TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
                 Labels.STRIMZI_NAME_LABEL, KafkaConnectResources.buildPodName(cluster),
                 Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND,
-                Labels.KUBERNETES_NAME_LABEL, KafkaConnectBuild.APPLICATION_NAME,
+                Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
+                Labels.KUBERNETES_NAME_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
                 Labels.KUBERNETES_INSTANCE_LABEL, this.cluster,
                 Labels.KUBERNETES_PART_OF_LABEL, Labels.APPLICATION_NAME + "-" + this.cluster,
                 Labels.KUBERNETES_MANAGED_BY_LABEL, AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
@@ -201,7 +203,7 @@ public class KafkaConnectBuildTest {
         assertThat(pod.getSpec().getContainers().get(0).getArgs(), is(defaultArgs));
         assertThat(pod.getSpec().getContainers().get(0).getName(), is(KafkaConnectResources.buildPodName(this.cluster)));
         assertThat(pod.getSpec().getContainers().get(0).getImage(), is(build.image));
-        assertThat(pod.getSpec().getContainers().get(0).getPorts().size(), is(0));
+        assertThat(pod.getSpec().getContainers().get(0).getPorts(), is(nullValue()));
         assertThat(pod.getSpec().getContainers().get(0).getResources().getLimits(), is(limit));
         assertThat(pod.getSpec().getContainers().get(0).getResources().getRequests(), is(request));
         assertThat(pod.getSpec().getVolumes().size(), is(2));
@@ -214,8 +216,7 @@ public class KafkaConnectBuildTest {
         assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(0).getMountPath(), is("/dockerfile"));
         assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getName(), is("docker-credentials"));
         assertThat(pod.getSpec().getContainers().get(0).getVolumeMounts().get(1).getMountPath(), is("/kaniko/.docker"));
-        assertThat(pod.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(pod.getMetadata().getOwnerReferences().get(0), is(build.createOwnerReference()));
+        TestUtils.checkOwnerReference(pod, kc);
     }
 
     @ParallelTest
@@ -239,7 +240,7 @@ public class KafkaConnectBuildTest {
 
         KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
-        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
+        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, "cf065b80ede090aa");
         assertThat(pod.getSpec().getVolumes().size(), is(1));
         assertThat(pod.getSpec().getContainers().get(0).getArgs(), is(defaultArgs));
         assertThat(pod.getSpec().getVolumes().get(0).getName(), is("dockerfile"));
@@ -277,8 +278,7 @@ public class KafkaConnectBuildTest {
         assertThat(cm.getMetadata().getName(), is(KafkaConnectResources.dockerFileConfigMapName(cluster)));
         assertThat(cm.getMetadata().getNamespace(), is(namespace));
         assertThat(cm.getData().get("Dockerfile"), is(dockerfile.getDockerfile()));
-        assertThat(cm.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(cm.getMetadata().getOwnerReferences().get(0), is(build.createOwnerReference()));
+        TestUtils.checkOwnerReference(cm, kc);
     }
 
     @ParallelTest
@@ -320,7 +320,8 @@ public class KafkaConnectBuildTest {
         Map<String, String> expectedDeploymentLabels = TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
                 Labels.STRIMZI_NAME_LABEL, KafkaConnectResources.buildPodName(cluster),
                 Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND,
-                Labels.KUBERNETES_NAME_LABEL, KafkaConnectBuild.APPLICATION_NAME,
+                Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
+                Labels.KUBERNETES_NAME_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
                 Labels.KUBERNETES_INSTANCE_LABEL, this.cluster,
                 Labels.KUBERNETES_PART_OF_LABEL, Labels.APPLICATION_NAME + "-" + this.cluster,
                 Labels.KUBERNETES_MANAGED_BY_LABEL, AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
@@ -332,8 +333,7 @@ public class KafkaConnectBuildTest {
         assertThat(bc.getSpec().getStrategy().getDockerStrategy(), is(notNullValue()));
         assertThat(bc.getSpec().getResources().getLimits(), is(limit));
         assertThat(bc.getSpec().getResources().getRequests(), is(request));
-        assertThat(bc.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(bc.getMetadata().getOwnerReferences().get(0), is(build.createOwnerReference()));
+        TestUtils.checkOwnerReference(bc, kc);
     }
 
     @ParallelTest
@@ -365,7 +365,8 @@ public class KafkaConnectBuildTest {
         Map<String, String> expectedDeploymentLabels = TestUtils.map(Labels.STRIMZI_CLUSTER_LABEL, this.cluster,
                 Labels.STRIMZI_NAME_LABEL, KafkaConnectResources.buildPodName(cluster),
                 Labels.STRIMZI_KIND_LABEL, KafkaConnect.RESOURCE_KIND,
-                Labels.KUBERNETES_NAME_LABEL, KafkaConnectBuild.APPLICATION_NAME,
+                Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
+                Labels.KUBERNETES_NAME_LABEL, KafkaConnectBuild.COMPONENT_TYPE,
                 Labels.KUBERNETES_INSTANCE_LABEL, this.cluster,
                 Labels.KUBERNETES_PART_OF_LABEL, Labels.APPLICATION_NAME + "-" + this.cluster,
                 Labels.KUBERNETES_MANAGED_BY_LABEL, AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
@@ -374,8 +375,7 @@ public class KafkaConnectBuildTest {
         assertThat(bc.getSpec().getOutput().getTo().getKind(), is("ImageStreamTag"));
         assertThat(bc.getSpec().getOutput().getTo().getName(), is("my-image:latest"));
         assertThat(bc.getSpec().getStrategy().getDockerStrategy(), is(notNullValue()));
-        assertThat(bc.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(bc.getMetadata().getOwnerReferences().get(0), is(build.createOwnerReference()));
+        TestUtils.checkOwnerReference(bc, kc);
     }
 
     @ParallelTest
@@ -436,7 +436,7 @@ public class KafkaConnectBuildTest {
 
         KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
-        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
+        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, "cf065b80ede090aa");
         assertThat(pod.getMetadata().getLabels().entrySet().containsAll(buildPodLabels.entrySet()), is(true));
         assertThat(pod.getMetadata().getAnnotations().entrySet().containsAll(buildPodAnnos.entrySet()), is(true));
         assertThat(pod.getSpec().getPriorityClassName(), is("top-priority"));
@@ -484,7 +484,7 @@ public class KafkaConnectBuildTest {
 
         KafkaConnectBuild build = KafkaConnectBuild.fromCrd(new Reconciliation("test", kc.getKind(), kc.getMetadata().getNamespace(), kc.getMetadata().getName()), kc, VERSIONS);
 
-        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, null);
+        Pod pod = build.generateBuilderPod(true, ImagePullPolicy.IFNOTPRESENT, null, "cf065b80ede090aa");
         assertThat(pod.getSpec().getContainers().get(0).getArgs(), is(expectedArgs));
     }
 

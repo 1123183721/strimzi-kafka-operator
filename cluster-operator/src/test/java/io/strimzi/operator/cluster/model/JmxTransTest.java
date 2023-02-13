@@ -46,6 +46,7 @@ import io.strimzi.test.TestUtils;
 import io.strimzi.test.annotations.ParallelSuite;
 import io.strimzi.test.annotations.ParallelTest;
 import io.vertx.core.json.JsonObject;
+import org.hamcrest.Matchers;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -188,13 +189,12 @@ public class JmxTransTest {
 
         assertThat(dep.getMetadata().getName(), is(JmxTransResources.deploymentName(cluster)));
         assertThat(dep.getMetadata().getNamespace(), is(namespace));
-        assertThat(dep.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(dep.getMetadata().getOwnerReferences().get(0), is(jmxTrans.createOwnerReference()));
+        TestUtils.checkOwnerReference(dep, kafkaAssembly);
 
         // checks on the main Exporter container
         assertThat(containers.get(0).getImage(), is(image));
         assertThat(containers.get(0).getEnv(), is(getExpectedEnvVars()));
-        assertThat(containers.get(0).getPorts().size(), is(0));
+        assertThat(containers.get(0).getPorts(), is(Matchers.nullValue()));
         assertThat(dep.getSpec().getStrategy().getType(), is("RollingUpdate"));
         assertThat(dep.getSpec().getStrategy().getRollingUpdate().getMaxSurge(), is(new IntOrString(1)));
         assertThat(dep.getSpec().getStrategy().getRollingUpdate().getMaxUnavailable(), is(new IntOrString(0)));
@@ -210,7 +210,7 @@ public class JmxTransTest {
         List<Volume> volumes = dep.getSpec().getTemplate().getSpec().getVolumes();
         assertThat(volumes.size(), is(2));
 
-        Volume volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
+        Volume volume = volumes.stream().filter(vol -> VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
         assertThat(volume.getEmptyDir().getSizeLimit(), is(new Quantity("5Mi")));
@@ -223,9 +223,9 @@ public class JmxTransTest {
         List<VolumeMount> volumesMounts = dep.getSpec().getTemplate().getSpec().getContainers().get(0).getVolumeMounts();
         assertThat(volumesMounts.size(), is(2));
 
-        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
+        VolumeMount volumeMount = volumesMounts.stream().filter(vol -> VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
-        assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
+        assertThat(volumeMount.getMountPath(), is(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
 
         volumeMount = volumesMounts.stream().filter(vol -> JmxTrans.JMXTRANS_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
@@ -247,8 +247,7 @@ public class JmxTransTest {
 
         assertThat(cm.getMetadata().getName(), is(JmxTransResources.configMapName(cluster)));
         assertThat(cm.getMetadata().getNamespace(), is(namespace));
-        assertThat(cm.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(cm.getMetadata().getOwnerReferences().get(0), is(jmxTrans.createOwnerReference()));
+        TestUtils.checkOwnerReference(cm, kafkaAssembly);
 
         assertThat(cm.getData().getOrDefault(JmxTrans.JMXTRANS_CONFIGMAP_KEY, ""), is("{\"servers\":[{\"host\":\"foo-kafka-0.foo-kafka-brokers\",\"port\":9999,\"username\":\"${kafka.username}\",\"password\":\"${kafka.password}\",\"queries\":[{\"obj\":\"kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=*\",\"attr\":[\"Count\"],\"outputWriters\":[{\"@class\":\"com.googlecode.jmxtrans.model.output.StdOutWriter\"}]}]},{\"host\":\"foo-kafka-1.foo-kafka-brokers\",\"port\":9999,\"username\":\"${kafka.username}\",\"password\":\"${kafka.password}\",\"queries\":[{\"obj\":\"kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=*\",\"attr\":[\"Count\"],\"outputWriters\":[{\"@class\":\"com.googlecode.jmxtrans.model.output.StdOutWriter\"}]}]},{\"host\":\"foo-kafka-2.foo-kafka-brokers\",\"port\":9999,\"username\":\"${kafka.username}\",\"password\":\"${kafka.password}\",\"queries\":[{\"obj\":\"kafka.server:type=BrokerTopicMetrics,name=MessagesInPerSec,topic=*\",\"attr\":[\"Count\"],\"outputWriters\":[{\"@class\":\"com.googlecode.jmxtrans.model.output.StdOutWriter\"}]}]}]}"));
     }
@@ -465,7 +464,7 @@ public class JmxTransTest {
                 .build();
 
         JmxTrans jmxTrans = JmxTrans.fromCrd(Reconciliation.DUMMY_RECONCILIATION, resource);
-        assertThat(jmxTrans.templateContainerSecurityContext, is(securityContext));
+        assertThat(jmxTrans.createContainer(null).getSecurityContext(), is(securityContext));
 
         Deployment deployment = jmxTrans.generateDeployment(null, null);
 

@@ -11,8 +11,8 @@ If your Strimzi deployment needs to handle a high volume of messages, you can us
 Producer and consumer configuration can help control the size and frequency of requests to Kafka brokers. 
 For more information on the configuration options, see the following:
 
-* xref:con-producer-config-properties-throughput-{context}[] 
-* xref:con-consumer-config-properties-throughput-{context}[]  
+* {ApacheKafkaProducerConfig}
+* {ApacheKafkaConsumerConfig}
 
 You can also use the same configuration options with the producers and consumers used by the Kafka Connect runtime source connectors (including MirrorMaker 2.0) and sink connectors.
 
@@ -74,7 +74,7 @@ New messages are not added to the buffer until these messages are acknowledged a
 You can try the following configuration changes to keep the underlying source message queue of outstanding messages at a manageable size:
 
 * Increasing the default value in milliseconds of the `offset.flush.timeout.ms`
-* Ensuring that there are enough xref:con-common-configuration-resources-reference[CPU and memory resources]
+* Ensuring that there are enough CPU and memory resources
 * Increasing the number of tasks that run in parallel by doing the following:
 ** Increasing the number of tasks that run in parallel using the `tasksMax` property
 ** Increasing the number of worker nodes that run tasks using the `replicas` property
@@ -130,6 +130,9 @@ spec:
     producer.override.linger.ms: 100
     # ...  
 ----
+
+NOTE: `FileStreamSourceConnector` and `FileStreamSinkConnector` are provided as example connectors. 
+For information on deploying them as `KafkaConnector` resources, see link:{BookURLDeploying}#proc-deploying-kafkaconnector-str[Deploying example KafkaConnector resources^]. 
 
 Consumer configuration is added for the sink connector. 
 
@@ -234,4 +237,4 @@ You can use these metrics to gauge whether or not you need to tune your configur
 .Additional resources
 
 * link:{BookURLDeploying}#assembly-metrics-setup-{context}[Grafana dashboards^]
-* link:{BookURLDeploying}#assembly-creating-managing-connectors-{context}[Creating and managing connectors^]
+* link:{BookURLDeploying}#using-kafka-connect-with-plug-ins-{context}[Adding connectors^]

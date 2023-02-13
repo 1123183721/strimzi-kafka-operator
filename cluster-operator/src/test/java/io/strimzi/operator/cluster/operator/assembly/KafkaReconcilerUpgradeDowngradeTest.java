@@ -13,7 +13,6 @@ import io.strimzi.api.kafka.model.listener.arraylistener.GenericKafkaListenerBui
 import io.strimzi.api.kafka.model.listener.arraylistener.KafkaListenerType;
 import io.strimzi.api.kafka.model.status.KafkaStatus;
 import io.strimzi.certs.OpenSslCertManager;
-import io.strimzi.platform.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.ClusterOperatorConfig;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
@@ -31,7 +30,9 @@ import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
+import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
+import io.strimzi.platform.KubernetesVersion;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.junit5.Checkpoint;
@@ -43,9 +44,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
-import java.util.Date;
+import java.time.Clock;
 import java.util.HashMap;
-import java.util.function.Supplier;
 
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -139,6 +139,20 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         ArgumentCaptor<StrimziPodSet> spsCaptor = ArgumentCaptor.forClass(StrimziPodSet.class);
         when(mockSpsOps.reconcile(any(), any(), any(), spsCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.patched(new StrimziPodSet())));
 
+        // Mock Secret gets
+        SecretOperator mockSecretOps = supplier.secretOperations;
+        when(mockSecretOps.getAsync(NAMESPACE, KafkaResources.kafkaSecretName(CLUSTER_NAME))).thenReturn(
+                Future.succeededFuture(ResourceUtils.createMockBrokersCertsSecret(NAMESPACE,
+                        CLUSTER_NAME,
+                        kafka.getSpec().getKafka().getReplicas(),
+                        KafkaResources.kafkaSecretName(CLUSTER_NAME),
+                        MockCertManager.serverCert(),
+                        MockCertManager.serverKey(),
+                        MockCertManager.serverKeyStore(),
+                        MockCertManager.certStorePassword()
+                ))
+        );
+
         // Run the test
         KafkaReconciler reconciler = new MockKafkaReconciler(
                 new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME),
@@ -150,7 +164,7 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(context.succeeding(i -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(context.succeeding(i -> context.verify(() -> {
             assertThat(spsCaptor.getAllValues().size(), is(1));
 
             StrimziPodSet sps = spsCaptor.getValue();
@@ -179,6 +193,20 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         ArgumentCaptor<StrimziPodSet> spsCaptor = ArgumentCaptor.forClass(StrimziPodSet.class);
         when(mockSpsOps.reconcile(any(), any(), any(), spsCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.patched(new StrimziPodSet())));
 
+        // Mock Secret gets
+        SecretOperator mockSecretOps = supplier.secretOperations;
+        when(mockSecretOps.getAsync(NAMESPACE, KafkaResources.kafkaSecretName(CLUSTER_NAME))).thenReturn(
+                Future.succeededFuture(ResourceUtils.createMockBrokersCertsSecret(NAMESPACE,
+                        CLUSTER_NAME,
+                        KAFKA.getSpec().getKafka().getReplicas(),
+                        KafkaResources.kafkaSecretName(CLUSTER_NAME),
+                        MockCertManager.serverCert(),
+                        MockCertManager.serverKey(),
+                        MockCertManager.serverKeyStore(),
+                        MockCertManager.certStorePassword()
+                ))
+        );
+
         // Run the test
         KafkaReconciler reconciler = new MockKafkaReconciler(
                 new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME),
@@ -190,7 +218,7 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(context.succeeding(i -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(context.succeeding(i -> context.verify(() -> {
             assertThat(spsCaptor.getAllValues().size(), is(1));
 
             StrimziPodSet sps = spsCaptor.getValue();
@@ -229,6 +257,20 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         ArgumentCaptor<StrimziPodSet> spsCaptor = ArgumentCaptor.forClass(StrimziPodSet.class);
         when(mockSpsOps.reconcile(any(), any(), any(), spsCaptor.capture())).thenReturn(Future.succeededFuture(ReconcileResult.patched(new StrimziPodSet())));
 
+        // Mock Secret gets
+        SecretOperator mockSecretOps = supplier.secretOperations;
+        when(mockSecretOps.getAsync(NAMESPACE, KafkaResources.kafkaSecretName(CLUSTER_NAME))).thenReturn(
+                Future.succeededFuture(ResourceUtils.createMockBrokersCertsSecret(NAMESPACE,
+                        CLUSTER_NAME,
+                        kafka.getSpec().getKafka().getReplicas(),
+                        KafkaResources.kafkaSecretName(CLUSTER_NAME),
+                        MockCertManager.serverCert(),
+                        MockCertManager.serverKey(),
+                        MockCertManager.serverKeyStore(),
+                        MockCertManager.certStorePassword()
+                ))
+        );
+
         // Run the test
         KafkaReconciler reconciler = new MockKafkaReconciler(
                 new Reconciliation("test-trigger", Kafka.RESOURCE_KIND, NAMESPACE, CLUSTER_NAME),
@@ -240,7 +282,7 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         KafkaStatus status = new KafkaStatus();
 
         Checkpoint async = context.checkpoint();
-        reconciler.reconcile(status, Date::new).onComplete(context.succeeding(i -> context.verify(() -> {
+        reconciler.reconcile(status, Clock.systemUTC()).onComplete(context.succeeding(i -> context.verify(() -> {
             assertThat(spsCaptor.getAllValues().size(), is(1));
 
             StrimziPodSet sps = spsCaptor.getValue();
@@ -265,7 +307,7 @@ public class KafkaReconcilerUpgradeDowngradeTest {
         }
 
         @Override
-        public Future<Void> reconcile(KafkaStatus kafkaStatus, Supplier<Date> dateSupplier)    {
+        public Future<Void> reconcile(KafkaStatus kafkaStatus, Clock clock)    {
             return podSet().map((Void) null);
         }
     }

@@ -4,7 +4,7 @@
     <parent>
         <groupId>io.strimzi</groupId>
         <artifactId>strimzi</artifactId>
-        <version>0.31.0-SNAPSHOT</version>
+        <version>0.34.0-SNAPSHOT</version>
     </parent>
     <modelVersion>4.0.0</modelVersion>
     <artifactId>api</artifactId>
@@ -16,10 +16,23 @@
         </license>
     </licenses>
 
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+
+        <!-- No Javadocs warnings as errors here => we do not want to fail because of warnings -->
+        <javadoc.fail.on.warnings>false</javadoc.fail.on.warnings>
+    </properties>
+
     <dependencies>
         <dependency>
             <groupId>io.fabric8</groupId>
             <artifactId>kubernetes-client</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.fabric8</groupId>
+            <artifactId>kubernetes-httpclient-jdk</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -66,7 +79,7 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <version>1.18.4</version>
+            <version>${lombok.version}</version>
             <scope>provided</scope>
         </dependency>
         <dependency>
@@ -114,7 +127,9 @@
     <build>
         <plugins>
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven.compiler.version}</version>
                 <executions>
                     <execution>
                         <id>default-compile</id>
@@ -123,6 +138,7 @@
                             <goal>compile</goal>
                         </goals>
                         <configuration>
+                            <useIncrementalCompilation>false</useIncrementalCompilation>
                             <compilerArgs combine.self="override">
                                 <arg>-Xlint:unchecked,deprecation</arg>
                             </compilerArgs>
@@ -145,7 +161,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>exec-maven-plugin</artifactId>
-                <version>1.6.0</version>
+                <version>${maven.exec.version}</version>
                 <executions>
                     <execution>
                         <!-- This step generates all CRDs apiextensions/v1 which contain only the v1beta2 version. This
@@ -242,7 +258,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <version>3.1.0</version>
+                <version>${maven.jar.version}</version>
                 <executions>
                     <execution>
                         <goals>

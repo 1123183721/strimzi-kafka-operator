@@ -1,5 +1,8 @@
 FROM registry.access.redhat.com/ubi8/ubi-minimal:latest
-ARG JAVA_VERSION=11
+
+LABEL org.opencontainers.image.source='https://github.com/strimzi/strimzi-kafka-operator'
+
+ARG JAVA_VERSION=17
 ARG TARGETPLATFORM
 
 USER root
@@ -8,7 +11,7 @@ RUN microdnf update \
     && microdnf --setopt=install_weak_deps=0 --setopt=tsflags=nodocs install java-${JAVA_VERSION}-openjdk-headless openssl shadow-utils \
     && microdnf clean all
 
-ENV JAVA_HOME /usr/lib/jvm/jre-11
+ENV JAVA_HOME /usr/lib/jvm/jre-17
 
 #####
 # Add Tini

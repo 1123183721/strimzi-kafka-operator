@@ -4,7 +4,6 @@
  */
 package io.strimzi.systemtest.operators;
 
-import io.fabric8.kubernetes.api.model.ContainerPort;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.LabelSelector;
 import io.fabric8.kubernetes.api.model.Pod;
@@ -48,13 +47,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-import static io.strimzi.systemtest.Constants.REGRESSION;
-import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
 import static io.strimzi.systemtest.Constants.INFRA_NAMESPACE;
+import static io.strimzi.systemtest.Constants.INTERNAL_CLIENTS_USED;
+import static io.strimzi.systemtest.Constants.REGRESSION;
 import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 /**
@@ -65,91 +63,7 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 @Tag(REGRESSION)
 @IsolatedSuite
 public class FeatureGatesIsolatedST extends AbstractST {
-
     private static final Logger LOGGER = LogManager.getLogger(FeatureGatesIsolatedST.class);
-
-    /**
-     * Control Plane Listener
-     * https://github.com/strimzi/proposals/blob/main/025-control-plain-listener.md
-     */
-    @IsolatedTest("Feature Gates test for disabled ControlPlainListener")
-    @Tag(INTERNAL_CLIENTS_USED)
-    public void testControlPlaneListenerFeatureGate(ExtensionContext extensionContext) {
-        assumeFalse(Environment.isOlmInstall() || Environment.isHelmInstall());
-
-        final String clusterName = mapWithClusterNames.get(extensionContext.getDisplayName());
-        final String producerName = "producer-test-" + new Random().nextInt(Integer.MAX_VALUE);
-        final String consumerName = "consumer-test-" + new Random().nextInt(Integer.MAX_VALUE);
-        final String topicName = KafkaTopicUtils.generateRandomNameOfTopic();
-        final LabelSelector kafkaSelector = KafkaResource.getLabelSelector(clusterName, KafkaResources.zookeeperStatefulSetName(clusterName));
-
-        int messageCount = 300;
-        List<EnvVar> testEnvVars = new ArrayList<>();
-        int kafkaReplicas = 1;
-
-        testEnvVars.add(new EnvVar(Environment.STRIMZI_FEATURE_GATES_ENV, "-ControlPlaneListener", null));
-
-        clusterOperator.unInstall();
-        clusterOperator = new SetupClusterOperator.SetupClusterOperatorBuilder()
-            .withExtensionContext(BeforeAllOnce.getSharedExtensionContext())
-            .withNamespace(INFRA_NAMESPACE)
-            .withWatchingNamespaces(Constants.WATCH_ALL_NAMESPACES)
-            .withExtraEnvVars(testEnvVars)
-            .createInstallation()
-            .runInstallation();
-
-        resourceManager.createResource(extensionContext, KafkaTemplates.kafkaPersistent(clusterName, kafkaReplicas).build());
-
-        LOGGER.info("Check for presence of ContainerPort 9090/tcp (tcp-ctrlplane) in first Kafka pod.");
-        final Pod kafkaPod = PodUtils.getPodsByPrefixInNameWithDynamicWait(clusterOperator.getDeploymentNamespace(), clusterName + "-kafka-").get(0);
-        ContainerPort expectedControlPlaneContainerPort = new ContainerPort(9090, null, null, "tcp-ctrlplane", "TCP");
-        List<ContainerPort> kafkaPodPorts = kafkaPod.getSpec().getContainers().get(0).getPorts();
-        assertTrue(kafkaPodPorts.contains(expectedControlPlaneContainerPort));
-
-        Map<String, String> kafkaPods = PodUtils.podSnapshot(clusterOperator.getDeploymentNamespace(), kafkaSelector);
-
-        LOGGER.info("Try to send some messages to Kafka over next few minutes.");
-        KafkaTopic kafkaTopic = KafkaTopicTemplates.topic(clusterName, topicName)
-            .editSpec()
-                .withReplicas(kafkaReplicas)
-                .withPartitions(kafkaReplicas)
-            .endSpec()
-            .build();
-        resourceManager.createResource(extensionContext, kafkaTopic);
-
-        KafkaClients kafkaBasicClientJob = new KafkaClientsBuilder()
-            .withProducerName(producerName)
-            .withConsumerName(consumerName)
-            .withBootstrapAddress(KafkaResources.plainBootstrapAddress(clusterName))
-            .withTopicName(topicName)
-            .withMessageCount(messageCount)
-            .withDelayMs(500)
-            .withNamespaceName(clusterOperator.getDeploymentNamespace())
-            .build();
-
-        resourceManager.createResource(extensionContext, kafkaBasicClientJob.producerStrimzi());
-        resourceManager.createResource(extensionContext, kafkaBasicClientJob.consumerStrimzi());
-        JobUtils.waitForJobRunning(consumerName, clusterOperator.getDeploymentNamespace());
-
-        LOGGER.info("Delete first found Kafka broker pod.");
-        kubeClient().deletePod(clusterOperator.getDeploymentNamespace(), kafkaPod);
-        RollingUpdateUtils.waitForComponentAndPodsReady(kafkaSelector, kafkaReplicas);
-
-        LOGGER.info("Force Rolling Update of Kafka via annotation.");
-        kafkaPods.keySet().forEach(podName -> {
-            kubeClient(clusterOperator.getDeploymentNamespace()).editPod(podName).edit(pod -> new PodBuilder(pod)
-                    .editMetadata()
-                        .addToAnnotations(Annotations.ANNO_STRIMZI_IO_MANUAL_ROLLING_UPDATE, "true")
-                    .endMetadata()
-                    .build());
-        });
-        LOGGER.info("Wait for next reconciliation to happen.");
-        RollingUpdateUtils.waitTillComponentHasRolled(clusterOperator.getDeploymentNamespace(), kafkaSelector, kafkaReplicas, kafkaPods);
-
-        LOGGER.info("Waiting for clients to finish sending/receiving messages.");
-        ClientUtils.waitForClientSuccess(producerName, clusterOperator.getDeploymentNamespace(), MESSAGE_COUNT);
-        ClientUtils.waitForClientSuccess(consumerName, clusterOperator.getDeploymentNamespace(), MESSAGE_COUNT);
-    }
 
     /**
      * UseStrimziPodSets feature gate
@@ -170,8 +84,8 @@ public class FeatureGatesIsolatedST extends AbstractST {
 
         int messageCount = 600;
         List<EnvVar> testEnvVars = new ArrayList<>();
-        int zooReplicas = 1;
-        int kafkaReplicas = 1;
+        int zooReplicas = 3;
+        int kafkaReplicas = 3;
 
         testEnvVars.add(new EnvVar(Environment.STRIMZI_FEATURE_GATES_ENV, "-UseStrimziPodSets", null));
 
@@ -213,13 +127,13 @@ public class FeatureGatesIsolatedST extends AbstractST {
         Pod zooPod = PodUtils.getPodsByPrefixInNameWithDynamicWait(clusterOperator.getDeploymentNamespace(), KafkaResources.zookeeperStatefulSetName(clusterName) + "-").get(0);
         LOGGER.info("Delete first found ZooKeeper pod {}", zooPod.getMetadata().getName());
         kubeClient().deletePod(clusterOperator.getDeploymentNamespace(), zooPod);
-        RollingUpdateUtils.waitForComponentAndPodsReady(zooSelector, zooReplicas);
+        RollingUpdateUtils.waitForComponentAndPodsReady(clusterOperator.getDeploymentNamespace(), zooSelector, zooReplicas);
 
         // Delete one Kafka Pod
         Pod kafkaPod = PodUtils.getPodsByPrefixInNameWithDynamicWait(clusterOperator.getDeploymentNamespace(), KafkaResources.kafkaStatefulSetName(clusterName) + "-").get(0);
         LOGGER.info("Delete first found Kafka broker pod {}", kafkaPod.getMetadata().getName());
         kubeClient().deletePod(clusterOperator.getDeploymentNamespace(), kafkaPod);
-        RollingUpdateUtils.waitForComponentAndPodsReady(kafkaSelector, kafkaReplicas);
+        RollingUpdateUtils.waitForComponentAndPodsReady(clusterOperator.getDeploymentNamespace(), kafkaSelector, kafkaReplicas);
 
         // Roll Zoo
         LOGGER.info("Force Rolling Update of ZooKeeper via annotation.");
@@ -291,7 +205,7 @@ public class FeatureGatesIsolatedST extends AbstractST {
 
         Map<String, String> kafkaPods = PodUtils.podSnapshot(clusterOperator.getDeploymentNamespace(), kafkaSelector);
         Map<String, String> zkPods = PodUtils.podSnapshot(clusterOperator.getDeploymentNamespace(), zkSelector);
-        Map<String, String> coPod = DeploymentUtils.depSnapshot(ResourceManager.getCoDeploymentName());
+        Map<String, String> coPod = DeploymentUtils.depSnapshot(clusterOperator.getDeploymentNamespace(), ResourceManager.getCoDeploymentName());
 
         KafkaClients clients = new KafkaClientsBuilder()
             .withProducerName(producerName)
@@ -309,31 +223,31 @@ public class FeatureGatesIsolatedST extends AbstractST {
         );
 
         LOGGER.info("Changing FG env variable to enable STS");
-        coEnvVars = kubeClient().getDeployment(Constants.STRIMZI_DEPLOYMENT_NAME).getSpec().getTemplate().getSpec().getContainers().get(0).getEnv();
+        coEnvVars = kubeClient().getDeployment(clusterOperator.getDeploymentNamespace(), Constants.STRIMZI_DEPLOYMENT_NAME).getSpec().getTemplate().getSpec().getContainers().get(0).getEnv();
         coEnvVars.stream().filter(env -> env.getName().equals(Environment.STRIMZI_FEATURE_GATES_ENV)).findFirst().get().setValue("-UseStrimziPodSets");
 
-        Deployment coDep = kubeClient().getDeployment(Constants.STRIMZI_DEPLOYMENT_NAME);
+        Deployment coDep = kubeClient().getDeployment(clusterOperator.getDeploymentNamespace(), Constants.STRIMZI_DEPLOYMENT_NAME);
         coDep.getSpec().getTemplate().getSpec().getContainers().get(0).setEnv(coEnvVars);
-        kubeClient().getClient().apps().deployments().inNamespace(clusterOperator.getDeploymentNamespace()).withName(Constants.STRIMZI_DEPLOYMENT_NAME).replace(coDep);
+        kubeClient().getClient().apps().deployments().inNamespace(clusterOperator.getDeploymentNamespace()).resource(coDep).replace();
 
-        coPod = DeploymentUtils.waitTillDepHasRolled(Constants.STRIMZI_DEPLOYMENT_NAME, 1, coPod);
+        coPod = DeploymentUtils.waitTillDepHasRolled(clusterOperator.getDeploymentNamespace(), Constants.STRIMZI_DEPLOYMENT_NAME, 1, coPod);
 
-        zkPods = RollingUpdateUtils.waitTillComponentHasRolled(zkSelector, zkReplicas, zkPods);
-        kafkaPods = RollingUpdateUtils.waitTillComponentHasRolled(kafkaSelector, kafkaReplicas, kafkaPods);
+        zkPods = RollingUpdateUtils.waitTillComponentHasRolled(clusterOperator.getDeploymentNamespace(), zkSelector, zkReplicas, zkPods);
+        kafkaPods = RollingUpdateUtils.waitTillComponentHasRolled(clusterOperator.getDeploymentNamespace(), kafkaSelector, kafkaReplicas, kafkaPods);
 
-        KafkaUtils.waitForKafkaReady(clusterName);
+        KafkaUtils.waitForKafkaReady(clusterOperator.getDeploymentNamespace(), clusterName);
 
         LOGGER.info("Changing FG env variable to disable again STS");
         coEnvVars.stream().filter(env -> env.getName().equals(Environment.STRIMZI_FEATURE_GATES_ENV)).findFirst().get().setValue("");
 
-        coDep = kubeClient().getDeployment(Constants.STRIMZI_DEPLOYMENT_NAME);
+        coDep = kubeClient().getDeployment(clusterOperator.getDeploymentNamespace(), Constants.STRIMZI_DEPLOYMENT_NAME);
         coDep.getSpec().getTemplate().getSpec().getContainers().get(0).setEnv(coEnvVars);
-        kubeClient().getClient().apps().deployments().inNamespace(clusterOperator.getDeploymentNamespace()).withName(Constants.STRIMZI_DEPLOYMENT_NAME).replace(coDep);
+        kubeClient().getClient().apps().deployments().inNamespace(clusterOperator.getDeploymentNamespace()).resource(coDep).replace();
 
-        DeploymentUtils.waitTillDepHasRolled(Constants.STRIMZI_DEPLOYMENT_NAME, 1, coPod);
+        DeploymentUtils.waitTillDepHasRolled(clusterOperator.getDeploymentNamespace(), Constants.STRIMZI_DEPLOYMENT_NAME, 1, coPod);
 
-        RollingUpdateUtils.waitTillComponentHasRolled(zkSelector, zkReplicas, zkPods);
-        RollingUpdateUtils.waitTillComponentHasRolled(kafkaSelector, kafkaReplicas, kafkaPods);
+        RollingUpdateUtils.waitTillComponentHasRolled(clusterOperator.getDeploymentNamespace(), zkSelector, zkReplicas, zkPods);
+        RollingUpdateUtils.waitTillComponentHasRolled(clusterOperator.getDeploymentNamespace(), kafkaSelector, kafkaReplicas, kafkaPods);
 
         ClientUtils.waitForClientsSuccess(producerName, consumerName, clusterOperator.getDeploymentNamespace(), messageCount);
     }
@@ -396,7 +310,7 @@ public class FeatureGatesIsolatedST extends AbstractST {
         resourceManager.createResource(extensionContext, kafka);
 
         resourceManager.createResource(extensionContext,
-            KafkaUserTemplates.tlsUser(testStorage.getClusterName(), testStorage.getUserName()).build()
+            KafkaUserTemplates.tlsUser(testStorage).build()
         );
 
         LOGGER.info("Try to send some messages to Kafka over next few minutes.");

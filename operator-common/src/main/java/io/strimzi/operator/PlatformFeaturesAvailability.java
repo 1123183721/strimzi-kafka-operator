@@ -30,6 +30,14 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
     private boolean images = false;
     private KubernetesVersion kubernetesVersion;
 
+    /**
+     * Creates a PlatformFeaturesAvailability instance
+     *
+     * @param vertx     Vert.x instance
+     * @param client    Kubernetes client
+     *
+     * @return  Instance of PlatformFeaturesAvailability
+     */
     public static Future<PlatformFeaturesAvailability> create(Vertx vertx, KubernetesClient client) {
         Promise<PlatformFeaturesAvailability> pfaPromise = Promise.promise();
 
@@ -196,6 +204,9 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         this.kubernetesVersion = kubernetesVersion;
     }
 
+    /**
+     * @return  True if OpenShift Routes are supported on this cluster
+     */
     public boolean hasRoutes() {
         return routes;
     }
@@ -204,6 +215,9 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         this.routes = routes;
     }
 
+    /**
+     * @return  True if OpenShift Builds are supported on this cluster
+     */
     public boolean hasBuilds() {
         return builds;
     }
@@ -212,6 +226,9 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         this.builds = builds;
     }
 
+    /**
+     * @return  True if OpenShift ImageStreams are supported on this cluster
+     */
     public boolean hasImages() {
         return images;
     }
@@ -220,17 +237,11 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
         this.images = images;
     }
 
+    /**
+     * @return  True if OpenShift S2I (Builds and Images) are supported on this cluster
+     */
     public boolean supportsS2I() {
         return hasBuilds() && hasImages();
-    }
-
-    /**
-     * Returns true when the Kubernetes cluster has V1 version of the Ingress resource (Kubernetes 1.19 and newer)
-     *
-     * @return True when Ingress V1 is supported. False otherwise.
-     */
-    public boolean hasIngressV1() {
-        return this.kubernetesVersion.compareTo(KubernetesVersion.V1_19) >= 0;
     }
 
     /**
@@ -240,15 +251,6 @@ public class PlatformFeaturesAvailability implements PlatformFeatures {
      */
     public boolean hasPodDisruptionBudgetV1() {
         return this.kubernetesVersion.compareTo(KubernetesVersion.V1_21) >= 0;
-    }
-
-    /**
-     * Returns true when the Kubernetes cluster has V1 version of the Events API resource (Kubernetes 1.19 and newer)
-     *
-     * @return True when events.k8s.io V1 is supported. False otherwise.
-     */
-    public boolean hasEventsApiV1() {
-        return this.kubernetesVersion.compareTo(KubernetesVersion.V1_19) >= 0;
     }
 
     @Override

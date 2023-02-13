@@ -57,7 +57,7 @@ public class KafkaResource implements ResourceType<Kafka> {
     @Override
     public void delete(Kafka resource) {
         final String namespaceName = resource.getMetadata().getNamespace();
-        final String clusterName = resource.getMetadata().getClusterName();
+        final String clusterName = resource.getMetadata().getName();
 
         Preconditions.notNull(namespaceName, "Kafka namespace name is null!");
         Preconditions.notNull(clusterName, "Kafka cluster name is null!");
@@ -108,10 +108,6 @@ public class KafkaResource implements ResourceType<Kafka> {
 
     public static MixedOperation<Kafka, KafkaList, Resource<Kafka>> kafkaClient() {
         return Crds.kafkaOperation(ResourceManager.kubeClient().getClient());
-    }
-
-    public static void replaceKafkaResource(String resourceName, Consumer<Kafka> editor) {
-        ResourceManager.replaceCrdResource(Kafka.class, KafkaList.class, resourceName, editor);
     }
 
     public static void replaceKafkaResourceInSpecificNamespace(String resourceName, Consumer<Kafka> editor, String namespaceName) {

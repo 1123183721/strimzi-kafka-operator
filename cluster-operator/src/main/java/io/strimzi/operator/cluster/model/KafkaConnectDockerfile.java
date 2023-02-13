@@ -48,12 +48,11 @@ public class KafkaConnectDockerfile {
     private static final String DEFAULT_MAVEN_IMAGE = "quay.io/strimzi/maven-builder:latest";
     private final String mavenBuilder;
 
-    public static Cmd run(String cmd, String... args) {
+    private static Cmd run(String cmd, String... args) {
         return new Cmd(new StringBuilder(), cmd, args);
     }
 
-    public static class Cmd {
-
+    private static class Cmd {
         private final StringBuilder stringBuilder;
         boolean doneFirst = false;
 
@@ -143,28 +142,33 @@ public class KafkaConnectDockerfile {
      * @param plugins       List of plugins which should be added to the container image
      */
     private void connectorPluginsPreStage(PrintWriter writer, List<Plugin> plugins) {
-        Map<String, List<MavenArtifact>> artifactMap = plugins.stream().collect(Collectors.toMap(plugin -> plugin.getName(),
+        Map<String, List<MavenArtifact>> artifactMap = plugins.stream().collect(Collectors.toMap(Plugin::getName,
             plugin -> plugin.getArtifacts().stream().filter(artifact -> artifact instanceof MavenArtifact).map(artifact -> (MavenArtifact) artifact).collect(Collectors.toList())));
         artifactMap.entrySet().removeIf(plugin -> plugin.getValue().isEmpty());
 
         if (artifactMap.size() > 0) {
             writer.println("FROM " + mavenBuilder + " AS downloadArtifacts");
-            artifactMap.entrySet().forEach(plugin -> {
-                plugin.getValue().forEach(mvn -> {
+            artifactMap.forEach((plugin, mvnList) ->
+                mvnList.forEach(mvn -> {
                     String repo = mvn.getRepository() == null ? MavenArtifact.DEFAULT_REPOSITORY : maybeAppendSlash(mvn.getRepository());
                     String artifactHash = Util.hashStub(mvn.getGroup() + "/" + mvn.getArtifact() + "/" + mvn.getVersion());
-                    String artifactDir = plugin.getKey() + "/" + artifactHash;
+                    String artifactDir = plugin + "/" + artifactHash;
+
+                    // For handling custom repositories, we need to write custom Maven settings file
+                    String settingsFile = "/tmp/" + artifactHash + ".xml";
+                    String settingsXml = "<settings xmlns=\"http://maven.apache.org/SETTINGS/1.0.0\"><profiles><profile><id>download</id><repositories><repository><id>custom-repo</id><url>" + escapeXml(repo) + "</url></repository></repositories></profile></profiles><activeProfiles><activeProfile>download</activeProfile></activeProfiles></settings>";
 
                     Cmd cmd = run("curl", "-f", "-L", "--create-dirs", "--output", "/tmp/" + artifactDir + "/pom.xml", assembleResourceUrl(repo, mvn, "pom"))
-                            .andRun("mvn", "dependency:copy-dependencies",
+                            .andRun("echo", settingsXml).redirectTo(settingsFile) // Create the settings file
+                            .andRun("mvn", "dependency:copy-dependencies", "-s", settingsFile,
                                     "-DoutputDirectory=/tmp/artifacts/" + artifactDir, "-f", "/tmp/" + artifactDir + "/pom.xml")
                             .andRun("curl", "-f", "-L", "--create-dirs", "--output",
                                     "/tmp/artifacts/" + artifactDir + "/" + mvn.getArtifact() + "-" + mvn.getVersion() + ".jar",
                                     assembleResourceUrl(repo, mvn, "jar"));
                     writer.append("RUN ").println(cmd);
                     writer.println();
-                });
-            });
+                })
+            );
         }
     }
 
@@ -477,5 +481,44 @@ public class KafkaConnectDockerfile {
         return Util.hashStub(dockerfile);
     }
 
+    /**
+     * This method escapes some of the basic XML characters. This is used when generating the Maven settings XML file.
+     * This method is not perfect - but for this use case it seems as an easier solution then including something like
+     * Apache Commons as a dependency.
+     *
+     * @param text  The text which should be escaped
+     *
+     * @return  Escaped text
+     */
+    private static String escapeXml(String text)   {
+        StringBuilder sb = new StringBuilder();
 
+        text.codePoints().forEach(c -> {
+            switch (c) {
+                case '<':
+                    sb.append("&lt;");
+                    break;
+                case '>':
+                    sb.append("&gt;");
+                    break;
+                case '&':
+                    sb.append("&amp;");
+                    break;
+                case '\"':
+                    sb.append("&quot;");
+                    break;
+                case '\'':
+                    sb.append("&apos;");
+                    break;
+                default:
+                    if (c > 0x7e) {
+                        sb.append("&#").append(c).append(";");
+                    } else {
+                        sb.append(Character.toChars(c));
+                    }
+            }
+        });
+
+        return sb.toString();
+    }
 }

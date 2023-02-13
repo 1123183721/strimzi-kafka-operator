@@ -7,7 +7,7 @@
 
 This procedure describes how to configure Kafka brokers so that the broker listeners are enabled to use OAuth 2.0 authentication using an authorization server.
 
-We advise use of OAuth 2.0 over an encrypted interface through configuration of TLS listeners.
+We advise use of OAuth 2.0 over an encrypted interface through through a listener with `tls: true`.
 Plain listeners are not recommended.
 
 If the authorization server is using certificates signed by the trusted CA and matching the OAuth 2.0 server hostname, TLS connection works using the default settings.
@@ -22,7 +22,7 @@ When configuring the Kafka broker you have two options for the mechanism used to
 
 For more information on the configuration of OAuth 2.0 authentication for Kafka broker listeners, see:
 
-* xref:type-KafkaListenerAuthenticationOAuth-reference[KafkaListenerAuthenticationOAuth schema reference]
+* link:{BookURLConfiguring}#type-KafkaListenerAuthenticationOAuth-reference[`KafkaListenerAuthenticationOAuth` schema reference^]
 * xref:con-oauth-authentication-flow-str[OAuth 2.0 authentication mechanisms]
 
 .Prerequisites

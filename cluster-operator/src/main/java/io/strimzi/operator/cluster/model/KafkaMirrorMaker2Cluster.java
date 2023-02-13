@@ -35,8 +35,11 @@ import java.util.function.Supplier;
 
 import static io.strimzi.operator.cluster.ClusterOperatorConfig.STRIMZI_DEFAULT_KAFKA_INIT_IMAGE;
 
+/**
+ * Kafka Mirror Maker 2 model
+ */
 public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
-    protected static final String APPLICATION_NAME = "kafka-mirror-maker-2";
+    protected static final String COMPONENT_TYPE = "kafka-mirror-maker-2";
 
     // Kafka MirrorMaker 2.0 connector configuration keys (EnvVariables)
     protected static final String ENV_VAR_KAFKA_MIRRORMAKER_2_CLUSTERS = "KAFKA_MIRRORMAKER_2_CLUSTERS";
@@ -50,7 +53,7 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
     protected static final String ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_CLIENT_SECRETS_CLUSTERS = "KAFKA_MIRRORMAKER_2_OAUTH_CLIENT_SECRETS_CLUSTERS";
     protected static final String ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_ACCESS_TOKENS_CLUSTERS = "KAFKA_MIRRORMAKER_2_OAUTH_OAUTH_ACCESS_TOKENS_CLUSTERS";
     protected static final String ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_REFRESH_TOKENS_CLUSTERS = "KAFKA_MIRRORMAKER_2_OAUTH_REFRESH_TOKENS_CLUSTERS";
-
+    protected static final String ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_PASSWORDS_CLUSTERS = "KAFKA_MIRRORMAKER_2_OAUTH_PASSWORDS_CLUSTERS";
     protected static final String CO_ENV_VAR_CUSTOM_MIRROR_MAKER2_POD_LABELS = "STRIMZI_CUSTOM_KAFKA_MIRROR_MAKER2_LABELS";
 
     protected static final String MIRRORMAKER_2_OAUTH_SECRETS_BASE_VOLUME_MOUNT = "/opt/kafka/mm2-oauth/";
@@ -75,8 +78,8 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
     private KafkaMirrorMaker2Cluster(Reconciliation reconciliation, HasMetadata resource) {
-        super(reconciliation, resource, APPLICATION_NAME);
-        this.name = KafkaMirrorMaker2Resources.deploymentName(cluster);
+        super(reconciliation, resource, KafkaMirrorMaker2Resources.deploymentName(resource.getMetadata().getName()), COMPONENT_TYPE);
+
         this.serviceName = KafkaMirrorMaker2Resources.serviceName(cluster);
         this.ancillaryConfigMapName = KafkaMirrorMaker2Resources.metricsAndLogConfigMapName(cluster);
     }
@@ -94,9 +97,8 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
                                                    KafkaVersion.Lookup versions) {
         KafkaMirrorMaker2Cluster cluster = new KafkaMirrorMaker2Cluster(reconciliation, kafkaMirrorMaker2);
         KafkaMirrorMaker2Spec spec = kafkaMirrorMaker2.getSpec();
-        cluster.setOwnerReference(kafkaMirrorMaker2);
 
-        cluster.setImage(versions.kafkaMirrorMaker2Version(spec.getImage(), spec.getVersion()));
+        cluster.image = versions.kafkaMirrorMaker2Version(spec.getImage(), spec.getVersion());
 
         List<KafkaMirrorMaker2ClusterSpec> clustersList = ModelUtils.asListOrEmptyList(spec.getClusters());
         cluster.setClusters(clustersList);
@@ -111,7 +113,7 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
         }        
         cluster.setConfiguration(new KafkaMirrorMaker2Configuration(reconciliation, connectCluster.getConfig().entrySet()));
         KafkaMirrorMaker2Cluster mm2 = fromSpec(reconciliation, buildKafkaConnectSpec(spec, connectCluster), versions, cluster);
-        mm2.templatePodLabels = Util.mergeLabelsOrAnnotations(mm2.templatePodLabels, DEFAULT_POD_LABELS);
+
         return mm2;
     }
 
@@ -149,16 +151,6 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
                 .withExternalConfiguration(spec.getExternalConfiguration())
                 .build();
 
-    }
-
-    @Override
-    protected String getDefaultLogConfigFileName() {
-        return "kafkaMirrorMaker2DefaultLoggingProperties";
-    }
-
-    @Override
-    public String getServiceAccountName() {
-        return KafkaMirrorMaker2Resources.serviceAccountName(cluster);
     }
 
     public String getInitContainerClusterRoleBindingName() {
@@ -221,6 +213,7 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
         final StringBuilder clustersOauthClientSecrets = new StringBuilder();
         final StringBuilder clustersOauthAccessTokens = new StringBuilder();
         final StringBuilder clustersOauthRefreshTokens = new StringBuilder();
+        final StringBuilder clustersOauthPasswords = new StringBuilder();
 
         for (KafkaMirrorMaker2ClusterSpec mirrorMaker2Cluster : clusters) {
             String clusterAlias = mirrorMaker2Cluster.getAlias();
@@ -259,47 +252,52 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
                     appendClusterOAuthSecretSource(clustersOauthClientSecrets, clusterAlias, oauth.getClientSecret());
                     appendClusterOAuthSecretSource(clustersOauthAccessTokens, clusterAlias, oauth.getAccessToken());
                     appendClusterOAuthSecretSource(clustersOauthRefreshTokens, clusterAlias, oauth.getRefreshToken());
+                    appendClusterPasswordSecretSource(clustersOauthPasswords, clusterAlias, oauth.getPasswordSecret());
                 }
             }
         }
 
-        varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_CLUSTERS, clusterAliases.toString()));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_CLUSTERS, clusterAliases.toString()));
 
         if (hasClusterWithTls) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_CLUSTERS, "true"));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_CLUSTERS, "true"));
         }
 
         if (clustersTrustedCerts.length() > 0) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TRUSTED_CERTS_CLUSTERS, clustersTrustedCerts.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TRUSTED_CERTS_CLUSTERS, clustersTrustedCerts.toString()));
         }
 
         if (clustersTlsAuthCerts.length() > 0 || clustersTlsAuthKeys.length() > 0) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_AUTH_CLUSTERS, "true"));
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_AUTH_CERTS_CLUSTERS, clustersTlsAuthCerts.toString()));
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_AUTH_KEYS_CLUSTERS, clustersTlsAuthKeys.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_AUTH_CLUSTERS, "true"));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_AUTH_CERTS_CLUSTERS, clustersTlsAuthCerts.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_TLS_AUTH_KEYS_CLUSTERS, clustersTlsAuthKeys.toString()));
         }
 
         if (clustersSaslPasswordFiles.length() > 0) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_SASL_PASSWORD_FILES_CLUSTERS, clustersSaslPasswordFiles.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_SASL_PASSWORD_FILES_CLUSTERS, clustersSaslPasswordFiles.toString()));
         }
 
         if (hasClusterOauthTrustedCerts) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_TRUSTED_CERTS, "true"));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_TRUSTED_CERTS, "true"));
         }
 
         if (clustersOauthClientSecrets.length() > 0) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_CLIENT_SECRETS_CLUSTERS, clustersOauthClientSecrets.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_CLIENT_SECRETS_CLUSTERS, clustersOauthClientSecrets.toString()));
         }
 
         if (clustersOauthAccessTokens.length() > 0) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_ACCESS_TOKENS_CLUSTERS, clustersOauthAccessTokens.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_ACCESS_TOKENS_CLUSTERS, clustersOauthAccessTokens.toString()));
         }
 
         if (clustersOauthRefreshTokens.length() > 0) {
-            varList.add(buildEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_REFRESH_TOKENS_CLUSTERS, clustersOauthRefreshTokens.toString()));
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_REFRESH_TOKENS_CLUSTERS, clustersOauthRefreshTokens.toString()));
         }
 
-        ModelUtils.jvmSystemProperties(varList, getJvmOptions());
+        if (clustersOauthPasswords.length() > 0) {
+            varList.add(ContainerUtils.createEnvVar(ENV_VAR_KAFKA_MIRRORMAKER_2_OAUTH_PASSWORDS_CLUSTERS, clustersOauthPasswords.toString()));
+        }
+
+        ModelUtils.jvmSystemProperties(varList, jvmOptions);
 
         return varList;
     }
@@ -360,8 +358,25 @@ public class KafkaMirrorMaker2Cluster extends KafkaConnectCluster {
         this.clusters = clusters;
     }
 
+    /**
+     * The command for running Connect has to be passed through a method so that we can handle different run commands
+     * for Connect and Mirror Maker 2 (which inherits from this class) without duplicating the whole container creation.
+     *
+     * @return  Command for starting Kafka Mirror Maker 2 container
+     */
     @Override
     protected String getCommand() {
         return "/opt/kafka/kafka_mirror_maker_2_run.sh";
+    }
+
+    /**
+     * The default labels Connect pod has to be passed through a method so that we can handle different labels for
+     * Connect and Mirror Maker 2 (which inherits from this class) without duplicating the whole pod creation.
+     *
+     * @return Default Pod Labels for Kafka Mirror Maker 2
+     */
+    @Override
+    protected Map<String, String> defaultPodLabels() {
+        return DEFAULT_POD_LABELS;
     }
 }

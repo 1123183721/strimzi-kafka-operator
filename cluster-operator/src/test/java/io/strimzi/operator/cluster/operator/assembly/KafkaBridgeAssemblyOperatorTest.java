@@ -9,6 +9,9 @@ import io.fabric8.kubernetes.api.model.ConfigMapBuilder;
 import io.fabric8.kubernetes.api.model.Service;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
 import io.fabric8.kubernetes.api.model.policy.v1.PodDisruptionBudget;
+import io.fabric8.kubernetes.api.model.rbac.ClusterRoleBinding;
+import io.fabric8.kubernetes.client.KubernetesClient;
+import io.strimzi.api.kafka.KafkaBridgeList;
 import io.strimzi.api.kafka.model.KafkaBridge;
 import io.strimzi.api.kafka.model.KafkaBridgeBuilder;
 import io.strimzi.api.kafka.model.KafkaBridgeConsumerSpec;
@@ -16,6 +19,8 @@ import io.strimzi.api.kafka.model.KafkaBridgeHttpConfig;
 import io.strimzi.api.kafka.model.KafkaBridgeProducerSpec;
 import io.strimzi.api.kafka.model.KafkaBridgeResources;
 import io.strimzi.api.kafka.model.status.KafkaBridgeStatus;
+import io.strimzi.operator.common.operator.resource.ClusterRoleBindingOperator;
+import io.strimzi.operator.common.operator.resource.CrdOperator;
 import io.strimzi.platform.KubernetesVersion;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
@@ -47,6 +52,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.Mockito;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -57,7 +63,9 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 
 import static java.util.Arrays.asList;
+import static java.util.Collections.emptyList;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.hamcrest.Matchers.hasSize;
@@ -68,6 +76,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -139,8 +148,8 @@ public class KafkaBridgeAssemblyOperatorTest {
                 supplier,
                 ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
 
-        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb,
-                VERSIONS);
+        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb
+        );
 
         Checkpoint async = context.checkpoint();
         ops.reconcile(new Reconciliation("test-trigger", KafkaBridge.RESOURCE_KIND, kbNamespace, kbName))
@@ -149,21 +158,21 @@ public class KafkaBridgeAssemblyOperatorTest {
                 List<Service> capturedServices = serviceCaptor.getAllValues();
                 assertThat(capturedServices, hasSize(1));
                 Service service = capturedServices.get(0);
-                assertThat(service.getMetadata().getName(), is(bridge.getServiceName()));
+                assertThat(service.getMetadata().getName(), is(KafkaBridgeResources.serviceName(kbName)));
                 assertThat(service, is(bridge.generateService()));
 
                 // Verify Deployment
                 List<Deployment> capturedDc = dcCaptor.getAllValues();
                 assertThat(capturedDc, hasSize(1));
                 Deployment dc = capturedDc.get(0);
-                assertThat(dc.getMetadata().getName(), is(bridge.getName()));
+                assertThat(dc.getMetadata().getName(), is(bridge.getComponentName()));
                 assertThat(dc, is(bridge.generateDeployment(Collections.singletonMap(Annotations.ANNO_STRIMZI_AUTH_HASH, "0"), true, null, null)));
 
                 // Verify PodDisruptionBudget
                 List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
                 assertThat(capturedPdb.size(), is(1));
                 PodDisruptionBudget pdb = capturedPdb.get(0);
-                assertThat(pdb.getMetadata().getName(), is(bridge.getName()));
+                assertThat(pdb.getMetadata().getName(), is(bridge.getComponentName()));
                 assertThat(pdb, is(bridge.generatePodDisruptionBudget()));
 
                 // Verify status
@@ -193,13 +202,13 @@ public class KafkaBridgeAssemblyOperatorTest {
         KafkaBridge kb = ResourceUtils.createKafkaBridge(kbNamespace, kbName, image, 1,
                 BOOTSTRAP_SERVERS, KAFKA_BRIDGE_PRODUCER_SPEC, KAFKA_BRIDGE_CONSUMER_SPEC, KAFKA_BRIDGE_HTTP_SPEC, true);
 
-        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb,
-                VERSIONS);
+        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb
+        );
         when(mockBridgeOps.get(kbNamespace, kbName)).thenReturn(kb);
         when(mockBridgeOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture(kb));
         when(mockBridgeOps.updateStatusAsync(any(), any(KafkaBridge.class))).thenReturn(Future.succeededFuture());
-        when(mockServiceOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateService());
-        when(mockDcOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateDeployment(Map.of(), true, null, null));
+        when(mockServiceOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateService());
+        when(mockDcOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateDeployment(Map.of(), true, null, null));
         when(mockDcOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDcOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
@@ -245,7 +254,7 @@ public class KafkaBridgeAssemblyOperatorTest {
                 List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
                 assertThat(capturedPdb, hasSize(1));
                 PodDisruptionBudget pdb = capturedPdb.get(0);
-                assertThat(pdb.getMetadata().getName(), is(bridge.getName()));
+                assertThat(pdb.getMetadata().getName(), is(bridge.getComponentName()));
                 assertThat(pdb, is(bridge.generatePodDisruptionBudget()));
 
                 // Verify scaleDown / scaleUp were not called
@@ -270,15 +279,15 @@ public class KafkaBridgeAssemblyOperatorTest {
 
         KafkaBridge kb = ResourceUtils.createKafkaBridge(kbNamespace, kbName, image, 1,
                 BOOTSTRAP_SERVERS, KAFKA_BRIDGE_PRODUCER_SPEC, KAFKA_BRIDGE_CONSUMER_SPEC, KAFKA_BRIDGE_HTTP_SPEC, true);
-        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb,
-                VERSIONS);
+        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb
+        );
         kb.getSpec().setImage("some/different:image"); // Change the image to generate some diff
 
         when(mockBridgeOps.get(kbNamespace, kbName)).thenReturn(kb);
         when(mockBridgeOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture(kb));
         when(mockBridgeOps.updateStatusAsync(any(), any(KafkaBridge.class))).thenReturn(Future.succeededFuture());
-        when(mockServiceOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateService());
-        when(mockDcOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateDeployment(Map.of(), true, null, null));
+        when(mockServiceOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateService());
+        when(mockDcOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateDeployment(Map.of(), true, null, null));
         when(mockDcOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDcOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
@@ -329,28 +338,28 @@ public class KafkaBridgeAssemblyOperatorTest {
         ops.createOrUpdate(new Reconciliation("test-trigger", KafkaBridge.RESOURCE_KIND, kbNamespace, kbName), kb)
             .onComplete(context.succeeding(v -> context.verify(() -> {
 
-                KafkaBridgeCluster compareTo = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb,
-                        VERSIONS);
+                KafkaBridgeCluster compareTo = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb
+                );
 
                 // Verify service
                 List<Service> capturedServices = serviceCaptor.getAllValues();
                 assertThat(capturedServices, hasSize(1));
                 Service service = capturedServices.get(0);
-                assertThat(service.getMetadata().getName(), is(compareTo.getServiceName()));
+                assertThat(service.getMetadata().getName(), is(KafkaBridgeResources.serviceName(kbName)));
                 assertThat(service, is(compareTo.generateService()));
 
                 // Verify Deployment
                 List<Deployment> capturedDc = dcCaptor.getAllValues();
                 assertThat(capturedDc, hasSize(1));
                 Deployment dc = capturedDc.get(0);
-                assertThat(dc.getMetadata().getName(), is(compareTo.getName()));
+                assertThat(dc.getMetadata().getName(), is(compareTo.getComponentName()));
                 assertThat(dc, is(compareTo.generateDeployment(Collections.singletonMap(Annotations.ANNO_STRIMZI_AUTH_HASH, "0"), true, null, null)));
 
                 // Verify PodDisruptionBudget
                 List<PodDisruptionBudget> capturedPdb = pdbCaptor.getAllValues();
                 assertThat(capturedPdb, hasSize(1));
                 PodDisruptionBudget pdb = capturedPdb.get(0);
-                assertThat(pdb.getMetadata().getName(), is(compareTo.getName()));
+                assertThat(pdb.getMetadata().getName(), is(compareTo.getComponentName()));
                 assertThat(pdb, is(compareTo.generatePodDisruptionBudget()));
 
                 // Verify scaleDown / scaleUp were not called
@@ -361,6 +370,35 @@ public class KafkaBridgeAssemblyOperatorTest {
                 verify(mockCmOps, never()).createOrUpdate(any(), any());
                 async.flag();
             })));
+    }
+
+
+    @Test
+    public void testDeleteClusterRoleBindings(VertxTestContext context) {
+        String bridgeName = "foo";
+        String bridgeNamespace = "test";
+
+        ResourceOperatorSupplier supplier = ResourceUtils.supplierWithMocks(false);
+
+        ClusterRoleBindingOperator mockCrbOps = supplier.clusterRoleBindingOperator;
+        ArgumentCaptor<ClusterRoleBinding> desiredCrb = ArgumentCaptor.forClass(ClusterRoleBinding.class);
+        when(mockCrbOps.reconcile(any(), eq(KafkaBridgeResources.initContainerClusterRoleBindingName(bridgeName, bridgeNamespace)), desiredCrb.capture())).thenReturn(Future.succeededFuture());
+
+        CrdOperator<KubernetesClient, KafkaBridge, KafkaBridgeList> mockCntrOps = supplier.kafkaBridgeOperator;
+        when(mockCntrOps.listAsync(any(), any(Labels.class))).thenReturn(Future.succeededFuture(emptyList()));
+
+        KafkaBridgeAssemblyOperator op = new KafkaBridgeAssemblyOperator(vertx, new PlatformFeaturesAvailability(true, kubernetesVersion),
+                                                                         new MockCertManager(), new PasswordGenerator(10, "a", "a"),
+                                                                         supplier, ResourceUtils.dummyClusterOperatorConfig(VERSIONS));
+        Reconciliation reconciliation = new Reconciliation("test-trigger", KafkaBridge.RESOURCE_KIND, bridgeNamespace, bridgeName);
+
+        Checkpoint async = context.checkpoint();
+
+        op.delete(reconciliation).onComplete(context.succeeding(c -> context.verify(() -> {
+            assertThat(desiredCrb.getValue(), is(nullValue()));
+            Mockito.verify(mockCrbOps, times(1)).reconcile(any(), any(), any());
+            async.flag();
+        })));
     }
 
     @Test
@@ -377,15 +415,15 @@ public class KafkaBridgeAssemblyOperatorTest {
 
         KafkaBridge kb = ResourceUtils.createKafkaBridge(kbNamespace, kbName, image, 1,
                 BOOTSTRAP_SERVERS, KAFKA_BRIDGE_PRODUCER_SPEC, KAFKA_BRIDGE_CONSUMER_SPEC, KAFKA_BRIDGE_HTTP_SPEC, true);
-        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb,
-                VERSIONS);
+        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb
+        );
         kb.getSpec().setImage("some/different:image"); // Change the image to generate some differences
 
         when(mockBridgeOps.get(kbNamespace, kbName)).thenReturn(kb);
         when(mockBridgeOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture(kb));
         when(mockBridgeOps.updateStatusAsync(any(), any(KafkaBridge.class))).thenReturn(Future.succeededFuture());
-        when(mockServiceOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateService());
-        when(mockDcOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateDeployment(Map.of(), true, null, null));
+        when(mockServiceOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateService());
+        when(mockDcOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateDeployment(Map.of(), true, null, null));
         when(mockDcOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDcOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
@@ -441,15 +479,15 @@ public class KafkaBridgeAssemblyOperatorTest {
 
         KafkaBridge kb = ResourceUtils.createEmptyKafkaBridge(kbNamespace, kbName);
         kb.getSpec().setReplicas(0);
-        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb, VERSIONS);
+        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb);
         kb.getSpec().setReplicas(scaleTo); // Change replicas to create ScaleUp
 
         when(mockBridgeOps.get(kbNamespace, kbName)).thenReturn(kb);
         when(mockBridgeOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture(kb));
         when(mockBridgeOps.updateStatusAsync(any(), any(KafkaBridge.class))).thenReturn(Future.succeededFuture());
-        when(mockServiceOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateService());
+        when(mockServiceOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateService());
         Deployment dep = bridge.generateDeployment(new HashMap<>(), true, null, null);
-        when(mockDcOps.get(kbNamespace, bridge.getName())).thenReturn(dep);
+        when(mockDcOps.get(kbNamespace, bridge.getComponentName())).thenReturn(dep);
         when(mockDcOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDcOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
@@ -458,10 +496,10 @@ public class KafkaBridgeAssemblyOperatorTest {
         when(mockDcOps.reconcile(any(), eq(kbNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         doAnswer(i -> Future.succeededFuture(scaleTo))
-                .when(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
+                .when(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
 
         doAnswer(i -> Future.succeededFuture(scaleTo))
-                .when(mockDcOps).scaleDown(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
+                .when(mockDcOps).scaleDown(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
 
         when(mockBridgeOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new KafkaBridge())));
         when(mockCmOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new ConfigMap())));
@@ -473,7 +511,7 @@ public class KafkaBridgeAssemblyOperatorTest {
         Checkpoint async = context.checkpoint();
         ops.createOrUpdate(new Reconciliation("test-trigger", KafkaBridge.RESOURCE_KIND, kbNamespace, kbName), kb)
             .onComplete(context.succeeding(v -> context.verify(() -> {
-                verify(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
+                verify(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
 
                 async.flag();
             })));
@@ -502,14 +540,14 @@ public class KafkaBridgeAssemblyOperatorTest {
                     .withReplicas(scaleTo)
                 .endSpec()
                 .build();
-        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb, VERSIONS);
+        KafkaBridgeCluster bridge = KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kb);
 
         when(mockBridgeOps.get(kbNamespace, kbName)).thenReturn(kb);
         when(mockBridgeOps.getAsync(anyString(), anyString())).thenReturn(Future.succeededFuture(kb));
         when(mockBridgeOps.updateStatusAsync(any(), any(KafkaBridge.class))).thenReturn(Future.succeededFuture());
-        when(mockServiceOps.get(kbNamespace, bridge.getName())).thenReturn(bridge.generateService());
+        when(mockServiceOps.get(kbNamespace, bridge.getComponentName())).thenReturn(bridge.generateService());
         Deployment dep = bridge.generateDeployment(new HashMap<>(), true, null, null);
-        when(mockDcOps.get(kbNamespace, bridge.getName())).thenReturn(dep);
+        when(mockDcOps.get(kbNamespace, bridge.getComponentName())).thenReturn(dep);
         when(mockDcOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDcOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
@@ -518,10 +556,10 @@ public class KafkaBridgeAssemblyOperatorTest {
         when(mockDcOps.reconcile(any(), eq(kbNamespace), any(), any())).thenReturn(Future.succeededFuture());
 
         doAnswer(i -> Future.succeededFuture(scaleTo))
-                .when(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
+                .when(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
 
         doAnswer(i -> Future.succeededFuture(scaleTo))
-                .when(mockDcOps).scaleDown(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
+                .when(mockDcOps).scaleDown(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
 
         when(mockBridgeOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new KafkaBridge())));
         when(mockCmOps.reconcile(any(), anyString(), any(), any())).thenReturn(Future.succeededFuture(ReconcileResult.created(new ConfigMap())));
@@ -533,8 +571,8 @@ public class KafkaBridgeAssemblyOperatorTest {
         Checkpoint async = context.checkpoint();
         ops.createOrUpdate(new Reconciliation("test-trigger", KafkaBridge.RESOURCE_KIND, kbNamespace, kbName), scaledDownCluster)
             .onComplete(context.succeeding(v -> context.verify(() -> {
-                verify(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
-                verify(mockDcOps).scaleDown(any(), eq(kbNamespace), eq(bridge.getName()), eq(scaleTo));
+                verify(mockDcOps).scaleUp(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
+                verify(mockDcOps).scaleDown(any(), eq(kbNamespace), eq(bridge.getComponentName()), eq(scaleTo));
                 async.flag();
             })));
     }
@@ -571,16 +609,16 @@ public class KafkaBridgeAssemblyOperatorTest {
         // providing the list of ALL Deployments for all the Kafka Bridge clusters
         Labels newLabels = Labels.forStrimziKind(KafkaBridge.RESOURCE_KIND);
         when(mockDcOps.list(eq(kbNamespace), eq(newLabels))).thenReturn(
-                List.of(KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, bar,
-                        VERSIONS).generateDeployment(Map.of(), true, null, null)));
+                List.of(KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, bar
+                ).generateDeployment(Map.of(), true, null, null)));
         when(mockDcOps.readiness(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
         when(mockDcOps.waitForObserved(any(), anyString(), anyString(), anyLong(), anyLong())).thenReturn(Future.succeededFuture());
 
         // providing the list Deployments for already "existing" Kafka Bridge clusters
         Labels barLabels = Labels.forStrimziCluster("bar");
         when(mockDcOps.list(eq(kbNamespace), eq(barLabels))).thenReturn(
-                List.of(KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, bar,
-                        VERSIONS).generateDeployment(Map.of(), true, null, null))
+                List.of(KafkaBridgeCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, bar
+                ).generateDeployment(Map.of(), true, null, null))
         );
 
         when(mockSecretOps.reconcile(any(), eq(kbNamespace), any(), any())).thenReturn(Future.succeededFuture());

@@ -121,7 +121,7 @@ class AllNamespaceIsolatedST extends AbstractNamespaceST {
     void testUOWatchingOtherNamespace(ExtensionContext extensionContext) {
         String previousNamespace = cluster.setNamespace(SECOND_NAMESPACE);
         LOGGER.info("Creating user in other namespace than CO and Kafka cluster with UO");
-        resourceManager.createResource(extensionContext, KafkaUserTemplates.tlsUser(MAIN_NAMESPACE_CLUSTER_NAME, USER_NAME).build());
+        resourceManager.createResource(extensionContext, KafkaUserTemplates.tlsUser(cluster.getNamespace(), MAIN_NAMESPACE_CLUSTER_NAME, USER_NAME).build());
 
         cluster.setNamespace(previousNamespace);
     }
@@ -131,7 +131,7 @@ class AllNamespaceIsolatedST extends AbstractNamespaceST {
         final TestStorage testStorage = new TestStorage(extensionContext, SECOND_NAMESPACE);
         String startingNamespace = cluster.setNamespace(SECOND_NAMESPACE);
 
-        KafkaUser user = KafkaUserTemplates.tlsUser(MAIN_NAMESPACE_CLUSTER_NAME, USER_NAME).build();
+        KafkaUser user = KafkaUserTemplates.tlsUser(testStorage.getNamespaceName(), MAIN_NAMESPACE_CLUSTER_NAME, USER_NAME).build();
 
         resourceManager.createResource(extensionContext, user);
 
@@ -155,7 +155,7 @@ class AllNamespaceIsolatedST extends AbstractNamespaceST {
 
         KafkaClients kafkaClients = new KafkaClientsBuilder()
             .withTopicName(TOPIC_NAME)
-            .withMessageCount(MESSAGE_COUNT)
+            .withMessageCount(testStorage.getMessageCount())
             .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(MAIN_NAMESPACE_CLUSTER_NAME))
             .withProducerName(testStorage.getProducerName())
             .withConsumerName(testStorage.getConsumerName())
@@ -164,7 +164,7 @@ class AllNamespaceIsolatedST extends AbstractNamespaceST {
             .build();
 
         resourceManager.createResource(extensionContext, kafkaClients.producerTlsStrimzi(MAIN_NAMESPACE_CLUSTER_NAME), kafkaClients.consumerTlsStrimzi(MAIN_NAMESPACE_CLUSTER_NAME));
-        ClientUtils.waitForClientsSuccess(testStorage.getProducerName(), testStorage.getConsumerName(), THIRD_NAMESPACE, MESSAGE_COUNT);
+        ClientUtils.waitForClientsSuccess(testStorage.getProducerName(), testStorage.getConsumerName(), THIRD_NAMESPACE, testStorage.getMessageCount());
 
         cluster.setNamespace(startingNamespace);
     }
@@ -176,7 +176,8 @@ class AllNamespaceIsolatedST extends AbstractNamespaceST {
                         .withNamespace(targetNamespace)
                     .endMetadata()
                     .build();
-        kubeClient(targetNamespace).getClient().secrets().inNamespace(targetNamespace).createOrReplace(s);
+
+        kubeClient(targetNamespace).getClient().secrets().inNamespace(targetNamespace).resource(s).createOrReplace();
     }
 
     private void deployTestSpecificResources(ExtensionContext extensionContext) {

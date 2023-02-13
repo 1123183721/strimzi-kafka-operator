@@ -33,13 +33,21 @@ import io.strimzi.api.kafka.model.storage.JbodStorage;
 import io.strimzi.api.kafka.model.storage.PersistentClaimStorage;
 import io.strimzi.api.kafka.model.storage.SingleVolumeStorage;
 import io.strimzi.api.kafka.model.storage.Storage;
+import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.operator.common.Util;
 
 /**
  * Shared methods for working with Volume
  */
 public class VolumeUtils {
-    private static Pattern volumeNamePattern = Pattern.compile("^([a-z0-9]{1}[a-z0-9-]{0,61}[a-z0-9]{1})$");
+    /*
+     * Default values for the Strimzi temporary directory
+     */
+    /*test*/ static final String STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME = "strimzi-tmp";
+    /*test*/ static final String STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH = "/tmp";
+    /*test*/ static final String STRIMZI_TMP_DIRECTORY_DEFAULT_SIZE = "5Mi";
+
+    private static final Pattern VOLUME_NAME_PATTERN = Pattern.compile("^([a-z0-9]{1}[a-z0-9-]{0,61}[a-z0-9]{1})$");
 
     private VolumeUtils() { }
 
@@ -70,12 +78,10 @@ public class VolumeUtils {
                 .withItems(keysPaths)
                 .build();
 
-        Volume volume = new VolumeBuilder()
+        return new VolumeBuilder()
                 .withName(validName)
                 .withConfigMap(configMapVolumeSource)
                 .build();
-
-        return volume;
     }
 
     /**
@@ -92,12 +98,10 @@ public class VolumeUtils {
                 .withName(configMapName)
                 .build();
 
-        Volume volume = new VolumeBuilder()
+        return new VolumeBuilder()
                 .withName(validName)
                 .withConfigMap(configMapVolumeSource)
                 .build();
-
-        return volume;
     }
 
     /**
@@ -134,11 +138,10 @@ public class VolumeUtils {
                 .withItems(keysPaths)
                 .build();
 
-        Volume volume = new VolumeBuilder()
+        return new VolumeBuilder()
                 .withName(validName)
                 .withSecret(secretVolumeSource)
                 .build();
-        return volume;
     }
 
     /**
@@ -162,11 +165,10 @@ public class VolumeUtils {
                 .withSecretName(secretName)
                 .build();
 
-        Volume volume = new VolumeBuilder()
+        return  new VolumeBuilder()
                 .withName(validName)
                 .withSecret(secretVolumeSource)
                 .build();
-        return volume;
     }
 
     /**
@@ -174,7 +176,7 @@ public class VolumeUtils {
      *
      * @param name      Name of the Volume
      * @param sizeLimit Volume size
-     * @param medium    Medium used for the emptryDir
+     * @param medium    Medium used for the emptyDir
      *
      * @return The Volume created
      */
@@ -191,11 +193,34 @@ public class VolumeUtils {
             emptyDirVolumeSource.setMedium(medium);
         }
 
-        Volume volume = new VolumeBuilder()
+        return new VolumeBuilder()
                 .withName(validName)
                 .withEmptyDir(emptyDirVolumeSource)
                 .build();
-        return volume;
+    }
+
+    /**
+     * Creates a volume for the temp directory with the default name
+     *
+     * @param template  Pod template which might contain a custom configuration for the size of the temp directory
+     *
+     * @return  Temp directory volume
+     */
+    public static Volume createTempDirVolume(PodTemplate template) {
+        return createTempDirVolume(STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME, template);
+    }
+
+    /**
+     * Creates a volume for the temp directory with custom name. The custom volume is important when running multiple
+     * containers in a single pod which need different volume names each.
+     *
+     * @param volumeName    Name of the volume
+     * @param template      Pod template which might contain a custom configuration for the size of the temp directory
+     *
+     * @return  Temp directory volume
+     */
+    public static Volume createTempDirVolume(String volumeName, PodTemplate template) {
+        return VolumeUtils.createEmptyDirVolume(volumeName, template != null && template.getTmpDirSizeLimit() != null ? template.getTmpDirSizeLimit() : STRIMZI_TMP_DIRECTORY_DEFAULT_SIZE, "Memory");
     }
 
     /**
@@ -227,11 +252,31 @@ public class VolumeUtils {
     public static VolumeMount createVolumeMount(String name, String path) {
         String validName = getValidVolumeName(name);
 
-        VolumeMount volumeMount = new VolumeMountBuilder()
+        return new VolumeMountBuilder()
                 .withName(validName)
                 .withMountPath(path)
                 .build();
-        return volumeMount;
+    }
+
+    /**
+     * Creates the volume mount for the temp directory with a default volume name
+     *
+     * @return  Volume mount for the temp directory
+     */
+    public static VolumeMount createTempDirVolumeMount() {
+        return createTempDirVolumeMount(STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME);
+    }
+
+    /**
+     * Creates the volume mount for the temp directory with a custom volume name. This is useful when running multiple
+     * containers in the same pod and needing to use different volume name for each of them.
+     *
+     * @param volumeName    Name of the volume
+     *
+     * @return  Volume mount for the temp directory
+     */
+    public static VolumeMount createTempDirVolumeMount(String volumeName) {
+        return createVolumeMount(volumeName, STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH);
     }
 
     /**
@@ -257,8 +302,7 @@ public class VolumeUtils {
                     // it's called recursively for setting the information from the current volume
                     volumes.addAll(createStatefulSetVolumes(volume, true));
                 }
-            } else if (storage instanceof EphemeralStorage) {
-                EphemeralStorage ephemeralStorage = (EphemeralStorage) storage;
+            } else if (storage instanceof EphemeralStorage ephemeralStorage) {
                 volumes.add(
                         createEmptyDirVolume(
                                 createVolumePrefix(ephemeralStorage.getId(), jbod),
@@ -293,8 +337,7 @@ public class VolumeUtils {
                     // it's called recursively for setting the information from the current volume
                     volumes.addAll(createPodSetVolumes(podName, volume, true));
                 }
-            } else if (storage instanceof EphemeralStorage) {
-                EphemeralStorage ephemeralStorage = (EphemeralStorage) storage;
+            } else if (storage instanceof EphemeralStorage ephemeralStorage) {
                 volumes.add(
                         createEmptyDirVolume(
                                 createVolumePrefix(ephemeralStorage.getId(), jbod),
@@ -330,8 +373,7 @@ public class VolumeUtils {
                     // it's called recursively for setting the information from the current volume
                     pvcs.addAll(createPersistentVolumeClaimTemplates(volume, true));
                 }
-            } else if (storage instanceof PersistentClaimStorage) {
-                PersistentClaimStorage persistentStorage = (PersistentClaimStorage) storage;
+            } else if (storage instanceof PersistentClaimStorage persistentStorage) {
                 String name = createVolumePrefix(persistentStorage.getId(), jbod);
                 pvcs.add(createPersistentVolumeClaimTemplate(name, persistentStorage));
             }
@@ -430,7 +472,7 @@ public class VolumeUtils {
      *     - start with an alphanumeric character
      *     - end with an alphanumeric character
      *
-     *  This method checkes if the volume name is a valid name and if not it will modify it to make it valid.
+     *  This method checks if the volume name is a valid name and if not it will modify it to make it valid.
      *
      * @param originalName  The original name of the volume
      * @return              Either the original volume name or a modified version to match volume name criteria
@@ -440,7 +482,7 @@ public class VolumeUtils {
             throw new RuntimeException("Volume name cannot be null");
         }
 
-        if (volumeNamePattern.matcher(originalName).matches()) {
+        if (VOLUME_NAME_PATTERN.matcher(originalName).matches()) {
             return originalName;
         } else {
             return makeValidVolumeName(originalName);
@@ -520,7 +562,7 @@ public class VolumeUtils {
     private static void addSecretVolume(List<Volume> volumeList, CertSecretSource certSecretSource, boolean isOpenShift, String alias) {
         String volumeName = alias != null ? alias + '-' + certSecretSource.getSecretName() : certSecretSource.getSecretName();
         // skipping if a volume with same name was already added
-        if (!volumeList.stream().anyMatch(v -> v.getName().equals(volumeName))) {
+        if (volumeList.stream().noneMatch(v -> v.getName().equals(volumeName))) {
             volumeList.add(VolumeUtils.createSecretVolume(volumeName, certSecretSource.getSecretName(), isOpenShift));
         }
     }
@@ -564,7 +606,7 @@ public class VolumeUtils {
     private static void addSecretVolumeMount(List<VolumeMount> volumeMountList,  CertSecretSource certSecretSource, String tlsVolumeMountPath, String alias) {
         String volumeMountName = alias != null ? alias + '-' + certSecretSource.getSecretName() : certSecretSource.getSecretName();
         // skipping if a volume mount with same Secret name was already added
-        if (!volumeMountList.stream().anyMatch(vm -> vm.getName().equals(volumeMountName))) {
+        if (volumeMountList.stream().noneMatch(vm -> vm.getName().equals(volumeMountName))) {
             volumeMountList.add(createVolumeMount(volumeMountName,
                     tlsVolumeMountPath + certSecretSource.getSecretName()));
         }

@@ -147,7 +147,7 @@ public class KubeClusterResource {
         bindingsNamespaces = namespaces;
         for (String namespace: namespaces) {
 
-            if (kubeClient().getNamespace(namespace) != null && System.getenv("SKIP_TEARDOWN") == null) {
+            if (kubeClient().getNamespace(namespace) != null && (System.getenv("SKIP_TEARDOWN") == null || !System.getenv("SKIP_TEARDOWN").equals("true"))) {
                 LOGGER.warn("Namespace {} is already created, going to delete it", namespace);
                 kubeClient().deleteNamespace(namespace);
                 cmdKubeClient().waitForResourceDeletion("Namespace", namespace);
@@ -215,8 +215,7 @@ public class KubeClusterResource {
                     .forEach(namespaceName -> {
                         LOGGER.debug("Deleting Namespace: {}", namespaceName);
                         kubeClient().deleteNamespace(namespaceName);
-                        client.getClient().namespaces().withName(namespaceName).waitUntilCondition(
-                            namespace -> client.getClient().namespaces().withName(namespaceName).get() == null, 4, TimeUnit.MINUTES);
+                        client.getClient().namespaces().withName(namespaceName).waitUntilCondition(namespace -> namespace == null, 4, TimeUnit.MINUTES);
                     }));
 
         MAP_WITH_SUITE_NAMESPACES.clear();

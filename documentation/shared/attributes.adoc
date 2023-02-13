@@ -13,27 +13,25 @@
 :toclevels: 3
 
 //Latest Strimzi version
-:ProductVersion: 0.31.0
-//Strimzi versions used in upgrades sections for API conversions
+:ProductVersion: 0.34.0
+//Strimzi versions used in upgrades sections
 :ConvertAfterProductVersion: 0.22
-:ConvertBeforeProductVersion: 0.23
 :LastReleaseWithCRDUpgrade: 0.24
 :UpgradeGuide: link:https://strimzi.io/docs/operators/0.24.0/deploying.html#assembly-upgrade-resources-str[Strimzi 0.24.0 upgrade documentation^]
 
-// Kubernetes and OpenShift versions
-:OpenShiftVersion: 4.3 and later
-:KubernetesVersion: 1.16 and later
+// Kubernetes versions
+:KubernetesVersion: 1.19 and later
 
 // Kafka upgrade attributes used in kafka upgrades section
-:DefaultKafkaVersion: 3.2.1
-:KafkaVersionLower: 3.1.0
-:KafkaVersionHigher: 3.2.1
+:DefaultKafkaVersion: 3.4.0
+:KafkaVersionLower: 3.3.1
+:KafkaVersionHigher: 3.4.0
 :ExampleImageTagUpgrades: quay.io/strimzi/kafka:{ProductVersion}-kafka-{KafkaVersionHigher}
 
 //inter-broker protocol and log message version
-:DefaultInterBrokerVersion: 3.2
-:InterBrokerVersionLower: 3.1
-:InterBrokerVersionHigher: 3.2
+:DefaultInterBrokerVersion: 3.4
+:InterBrokerVersionLower: 3.3
+:InterBrokerVersionHigher: 3.4
 
 // Source and download links
 :ReleaseDownload: https://github.com/strimzi/strimzi-kafka-operator/releases[GitHub releases page^]
@@ -48,24 +46,26 @@
 
 //OAuth attributes and links
 :keycloak-server-doc: link:https://www.keycloak.org/documentation.html[Keycloak documentation^]
-:keycloak-server-install-doc: link:https://www.keycloak.org/docs/latest/server_installation/index.html#_operator[Installing the Keycloak Operator^]
+:keycloak-server-install-doc: link:https://www.keycloak.org/operator/installation[Installing the Keycloak Operator^]
 :keycloak-authorization-services: link:https://www.keycloak.org/docs/latest/authorization_services/index.html[Keycloak Authorization Services^]
 :oauth-blog: link:https://strimzi.io/2019/10/25/kafka-authentication-using-oauth-2.0.html[Kafka authentication using OAuth 2.0^]
-:OAuthVersion: 0.10.0
+:OAuthVersion: 0.11.0
 :oauth-demo-keycloak: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{OAuthVersion}/examples[Using Keycloak as the OAuth 2.0 authorization server^]
 :oauth-demo-hydra: link:https://github.com/strimzi/strimzi-kafka-oauth/tree/{OAuthVersion}/examples/docker#running-with-hydra-using-ssl-and-opaque-tokens[Using Hydra as the OAuth 2.0 authorization server^]
 
 // External links
 :aws-ebs: link:https://aws.amazon.com/ebs/[Amazon Elastic Block Store (EBS)^]
+:JavaServiceProvider: link:https://www.baeldung.com/java-spi[Java Service Provider Interface^]
 :kubernetes-docs: link:https://kubernetes.io/docs/home/
 :kafkaDoc: link:https://kafka.apache.org/documentation/[Apache Kafka documentation^]
 :K8sAffinity: link:https://kubernetes.io/docs/concepts/configuration/assign-pod-node/[Kubernetes node and pod affinity documentation^]
+:K8sDownwardAPI: link:https://kubernetes.io/docs/tasks/inject-data-application/downward-api-volume-expose-pod-information/#the-downward-api[Downward API^]
 :K8sTolerations: link:https://kubernetes.io/docs/concepts/configuration/taint-and-toleration/[Kubernetes taints and tolerations^]
 :K8sTopologySpreadConstraints: link:https://kubernetes.io/docs/concepts/workloads/pods/pod-topology-spread-constraints/[Kubernetes Topology Spread Constraints^]
 :K8sEmptyDir: link:https://kubernetes.io/docs/concepts/storage/volumes/#emptydir[emptyDir^]
 :K8sPersistentVolumeClaims: link:https://kubernetes.io/docs/concepts/storage/dynamic-provisioning/[Persistent Volume Claims^]
-:K8sLocalPersistentVolumes: link:https://kubernetes.io/docs/concepts/storage/volumes/#local[Local persistent volumes^]
-:K8SStorageClass: link:https://kubernetes.io/docs/concepts/storage/storage-classes/[Storage Class^]
+:K8sLocalPersistentVolumes: link:https://kubernetes.io/docs/concepts/storage/volumes/#local[local persistent volumes^]
+:K8SStorageClass: link:https://kubernetes.io/docs/concepts/storage/storage-classes/[StorageClass^]
 :K8SJsonPath: link:https://kubernetes.io/docs/reference/kubectl/jsonpath/[JSONPath support^]
 :K8sMeaningOfCpu: link:https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/#meaning-of-cpu[Meaning of CPU^]
 :K8sMeaningOfMemory: link:https://kubernetes.io/docs/concepts/configuration/manage-compute-resources-container/#meaning-of-memory[Meaning of memory^]
@@ -76,13 +76,15 @@
 :K8sCRDs: link:https://kubernetes.io/docs/tasks/access-kubernetes-api/custom-resources/custom-resource-definitions/[Extend the Kubernetes API with CustomResourceDefinitions^]
 :K8sResizingPersistentVolumesUsingKubernetes: link:https://kubernetes.io/blog/2018/07/12/resizing-persistent-volumes-using-kubernetes/[Resizing Persistent Volumes using Kubernetes^]
 :K8sPriorityClass: link:https://kubernetes.io/docs/concepts/configuration/pod-priority-preemption[Pod Priority and Preemption^]
+:K8sSecurityContext: link:https://kubernetes.io/docs/tasks/configure-pod-container/security-context/[Security context^]
+:K8sSecurityStandards: link:https://kubernetes.io/docs/concepts/security/pod-security-standards/[Pod security standards^]
 :K8sServiceDiscovery: https://kubernetes.io/docs/concepts/services-networking/service/#discovering-services[Discovering services^]
 :K8sWellKnownLabelsAnnotationsAndTaints: link:https://kubernetes.io/docs/reference/kubernetes-api/labels-annotations-taints/[Well-Known Labels, Annotations and Taints^]
 :K8sZoneLabel: link:https://kubernetes.io/docs/reference/labels-annotations-taints/#topologykubernetesiozone[topology.kubernetes.io/zone^]
 :K8sDockerSecret: link:https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#registry-secret-existing-credentials[Create a Secret based on existing Docker credentials^]
 :MavenCentral: https://mvnrepository.com/repos/central[Maven Central repository^]
 :Minikube: link:https://kubernetes.io/docs/tasks/tools/install-minikube/[Install and start Minikube]
-:NginxIngressController: link:https://github.com/kubernetes/ingress-nginx[NGINX Ingress Controller for Kubernetes^]
+:NginxIngressController: link:https://github.com/kubernetes/ingress-nginx[Ingress NGINX Controller for Kubernetes^]
 :NginxIngressControllerTLSPassthrough: link:https://kubernetes.github.io/ingress-nginx/user-guide/tls/#ssl-passthrough[TLS passthrough documentation]
 :KubernetesExternalDNS: link:https://github.com/kubernetes-incubator/external-dns[External DNS^]
 :ApacheKafkaBrokerConfig: link:https://kafka.apache.org/documentation/#brokerconfigs[Apache Kafka documentation^]
@@ -103,19 +105,34 @@
 :OperatorHub: link:https://operatorhub.io/operator/strimzi-kafka-operator[OperatorHub.io^]
 :OperatorLifecycleManager: link:https://github.com/operator-framework/operator-lifecycle-manager[Operator Lifecycle Manager^]
 :OLMOperatorDocs: link:https://olm.operatorframework.io/docs/[Operator Lifecycle Manager documentation^]
-:OpenTracingHome: link:https://opentracing.io/[OpenTracing^]
-:OpenTracingDocs: link:https://opentracing.io/docs/overview/[OpenTracing documentation^]
-:JaegerHome: link:https://www.jaegertracing.io/[Jaeger^]
-:JaegerDocs: link:https://www.jaegertracing.io/docs/[Jaeger documentation^]
 :OPAAuthorizer: link:https://github.com/anderseknert/opa-kafka-plugin[Open Policy Agent plugin for Kafka authorization^]
 :external-cors-link: link:https://fetch.spec.whatwg.org/[Fetch CORS specification^]
 :HelmCustomResourceDefinitions: link:https://helm.sh/docs/chart_best_practices/custom_resource_definitions/[Custom Resource Definitions for Helm^]
+
+//distributed tracing versions and links
+:JaegerClientVersion: 1.3.2
+:OpenTracingKafkaClient: 0.1.15
+:OpenTelemetryAlphaVersion: 1.18.0-alpha
+:OpenTelemetryVersion: 1.18.0
+
+:OpenTelemetryDocs: link:https://opentelemetry.io/docs/[OpenTelemetry documentation^]
+:OpenTracingDocs: link:https://opentracing.io/docs/[OpenTracing documentation^]
+:JaegerDocs: link:https://www.jaegertracing.io/docs/[Jaeger documentation^]
+:OpenTracingKafkaClientDocs: link:https://github.com/opentracing-contrib/java-kafka-client[OpenTracing Apache Kafka client instrumentation]
+
+//strimzi github links
+:PodSecurityInterface: link:https://github.com/strimzi/strimzi-kafka-operator/blob/main/api/src/main/java/io/strimzi/plugin/security/profiles/PodSecurityProvider.java[Pod security provider interface^]
+:PodSecurityProviders: link:https://github.com/strimzi/strimzi-kafka-operator/tree/main/api/src/main/java/io/strimzi/plugin/security/profiles/impl[Baseline Provider and Restricted Provider classes^]
+:PodSecurityProvidersConfig: link:https://github.com/strimzi/strimzi-kafka-operator/blob/main/api/src/main/resources/META-INF/services/io.strimzi.plugin.security.profiles.PodSecurityProvider[Provider configuration file^]
+
+//OpenShift documentation
+:OpenShiftDocs: link:https://docs.openshift.com[OpenShift documentation^]
 
 // Container image names and repositories
 :DockerOrg: quay.io/strimzi
 :DockerTag: {ProductVersion}
 :BridgeDockerTag: {BridgeVersion}
-:DrainCleanerDockerTag: 0.3.0
+:DrainCleanerDockerTag: 0.3.1
 :DockerRepository: https://quay.io/organization/strimzi[Container Registry^]
 :DockerZookeeper: quay.io/strimzi/kafka:{DockerTag}-kafka-{DefaultKafkaVersion}
 :DockerKafkaImageCurrent: quay.io/strimzi/kafka:{DockerTag}-kafka-{KafkaVersionHigher}
@@ -144,14 +161,11 @@
 :KafkaRebalanceApiVersion: kafka.strimzi.io/v1beta2
 :KafkaBridgeApiVersion: kafka.strimzi.io/v1beta2
 
-// Tracing versions
-:JaegerClientVersion: 1.3.2
-:OpenTracingKafkaClient: 0.1.15
-
 // Section enablers
 :InstallationAppendix:
 :Metrics:
 :Downloading:
+:Section:
 
 //EXCLUSIVE TO STRIMZI
 :sectlinks:
@@ -162,7 +176,7 @@
 
 // Links to other Strimzi documentation books
 :BookURLDeploying: ./deploying.html
-:BookURLUsing: ./using.html
+:BookURLConfiguring: ./configuring.html
 :BookURLOverview: ./overview.html
 :BookURLBridge: https://strimzi.io/docs/bridge/latest/
 

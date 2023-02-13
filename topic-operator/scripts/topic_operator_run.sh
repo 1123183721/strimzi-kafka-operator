@@ -2,12 +2,16 @@
 set -e
 
 # Clean-up /tmp directory from files which might have remained from previous container restart
-rm -rfv /tmp/*
+# We ignore any errors which might be caused by files injected by different agents which we do not have the rights to delete
+rm -rfv /tmp/* || true
 
 if [ -f /opt/topic-operator/custom-config/log4j2.properties ];
 then
     export JAVA_OPTS="${JAVA_OPTS} -Dlog4j2.configurationFile=file:/opt/topic-operator/custom-config/log4j2.properties"
 fi
+
+# The java.util.logging.manager is set because of OkHttp client which is using JUL logging
+export JAVA_OPTS="${JAVA_OPTS} -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 if [ -n "$STRIMZI_JAVA_SYSTEM_PROPERTIES" ]; then
     export JAVA_OPTS="${JAVA_OPTS} ${STRIMZI_JAVA_SYSTEM_PROPERTIES}"

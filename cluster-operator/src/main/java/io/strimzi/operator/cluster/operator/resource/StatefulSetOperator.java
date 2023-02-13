@@ -5,7 +5,6 @@
 package io.strimzi.operator.cluster.operator.resource;
 
 import io.fabric8.kubernetes.api.model.DeletionPropagation;
-import io.fabric8.kubernetes.api.model.ObjectMeta;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
 import io.fabric8.kubernetes.api.model.apps.StatefulSetList;
@@ -15,7 +14,7 @@ import io.fabric8.kubernetes.client.dsl.RollableScalableResource;
 import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
-import io.strimzi.operator.common.operator.resource.AbstractScalableResourceOperator;
+import io.strimzi.operator.common.operator.resource.AbstractScalableNamespacedResourceOperator;
 import io.strimzi.operator.common.operator.resource.PodOperator;
 import io.strimzi.operator.common.operator.resource.ReconcileResult;
 import io.vertx.core.CompositeFuture;
@@ -30,7 +29,7 @@ import java.util.Map;
 /**
  * Operations for {@code StatefulSets}s
  */
-public class StatefulSetOperator extends AbstractScalableResourceOperator<KubernetesClient, StatefulSet, StatefulSetList, RollableScalableResource<StatefulSet>> {
+public class StatefulSetOperator extends AbstractScalableNamespacedResourceOperator<KubernetesClient, StatefulSet, StatefulSetList, RollableScalableResource<StatefulSet>> {
     private static final int NO_GENERATION = -1;
     private static final int INIT_GENERATION = 0;
 
@@ -75,10 +74,6 @@ public class StatefulSetOperator extends AbstractScalableResourceOperator<Kubern
         }
     }
 
-    private static ObjectMeta templateMetadata(StatefulSet resource) {
-        return resource.getSpec().getTemplate().getMetadata();
-    }
-
     /**
      * The name of the given pod given by {@code podId} in the given StatefulSet.
      * @param desired The StatefulSet
@@ -86,7 +81,7 @@ public class StatefulSetOperator extends AbstractScalableResourceOperator<Kubern
      * @return The name of the pod.
      */
     public String getPodName(StatefulSet desired, int podId) {
-        return templateMetadata(desired).getName() + "-" + podId;
+        return desired.getMetadata().getName() + "-" + podId;
     }
 
     private void setGeneration(StatefulSet desired, int nextGeneration) {
@@ -104,6 +99,14 @@ public class StatefulSetOperator extends AbstractScalableResourceOperator<Kubern
         return !diff.isEmpty() && needsRollingUpdate(reconciliation, diff);
     }
 
+    /**
+     * Checks if rolling update is needed or not
+     *
+     * @param reconciliation    Reconciliation marker
+     * @param diff              StatefulSet diff
+     *
+     * @return  True if restart is needed. False otherwise.
+     */
     public static boolean needsRollingUpdate(Reconciliation reconciliation, StatefulSetDiff diff) {
         if (diff.changesLabels()) {
             LOGGER.debugCr(reconciliation, "Changed labels => needs rolling update");

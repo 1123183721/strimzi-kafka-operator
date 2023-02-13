@@ -166,13 +166,13 @@ public class HttpBridgeKafkaExternalListenersST extends AbstractST {
 
         // Create user
         if (auth.getType().equals(Constants.TLS_LISTENER_DEFAULT_NAME)) {
-            resourceManager.createResource(extensionContext, KafkaUserTemplates.tlsUser(clusterName, weirdUserName)
+            resourceManager.createResource(extensionContext, KafkaUserTemplates.tlsUser(namespace, clusterName, weirdUserName)
                 .editMetadata()
                     .withNamespace(namespace)
                 .endMetadata()
                 .build());
         } else {
-            resourceManager.createResource(extensionContext, KafkaUserTemplates.scramShaUser(clusterName, weirdUserName)
+            resourceManager.createResource(extensionContext, KafkaUserTemplates.scramShaUser(namespace, clusterName, weirdUserName)
                 .editMetadata()
                     .withNamespace(namespace)
                 .endMetadata()
@@ -211,8 +211,11 @@ public class HttpBridgeKafkaExternalListenersST extends AbstractST {
             .withBootstrapAddress(externalBootstrapServers)
             .withNamespaceName(namespace)
             .withTopicName(topicName)
-            .withMessageCount(100)
+            .withMessageCount(MESSAGE_COUNT)
             .withUserName(weirdUserName)
+            // we disable ssl.endpoint.identification.algorithm for external listener (i.e., NodePort),
+            // because TLS hostname verification is not supported on such listener type.
+            .withAdditionalConfig("ssl.endpoint.identification.algorithm=\n")
             .build();
 
         if (auth.getType().equals(Constants.TLS_LISTENER_DEFAULT_NAME)) {

@@ -6,6 +6,9 @@ This document gives a detailed breakdown of the various build processes and opti
 
 - [Developer Quick Start](#developer-quick-start)
 - [Build Pre-Requisites](#build-pre-requisites)
+- [Using an IDE](#using-an-ide)
+   - [IntelliJ IDEA](#intellij-idea)
+   - [IDE build problems](#ide-build-problems)
 - [Build and deploy Strimzi from source](#build-and-deploy-from-source)
 - [Build details](#build-details)
    - [Make targets](#make-targets)
@@ -18,7 +21,6 @@ This document gives a detailed breakdown of the various build processes and opti
 - [Helm Chart](#helm-chart)
 - [Running system tests](#running-system-tests)
 - [DCO Signoff](#dco-signoff)
-- [IDE build problems](#ide-build-problems)
 - [Building container images for other platforms with Docker `buildx`](#building-container-images-for-other-platforms-with-docker-buildx)
 
 <!-- /TOC -->
@@ -64,17 +66,20 @@ run `brew install bash` to install a compatible version of `bash`. If you wish t
 updated bash run `sudo bash -c 'echo /usr/local/bin/bash >> /etc/shells'` and `chsh -s /usr/local/bin/bash`
 
 The `mvn` tool might install the latest version of OpenJDK during the brew install. For builds on macOS to succeed,
-OpenJDK version 11 needs to be installed. This can be done by running `brew install openjdk@11`. For maven to read the
+OpenJDK version 17 needs to be installed. This can be done by running `brew install openjdk@17`. For maven to read the
 new Java version, you will need to edit the `~/.mavenrc` file and paste the following
-line `export JAVA_HOME=/Library/Java/JavaVirtualMachines/openjdk-11.jdk/Contents/Home`.
+line `export JAVA_HOME=/Library/Java/JavaVirtualMachines/openjdk-17.jdk/Contents/Home`.
 
 You may come across an issue of linking from the above step. To solve this run this command: 
-`sudo ln -sfn /usr/local/opt/openjdk@11/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk-11.jdk`.
+`sudo ln -sfn /usr/local/opt/openjdk@17/libexec/openjdk.jdk /Library/Java/JavaVirtualMachines/openjdk-17.jdk`.
 If this throws an error that it cannot find the file or directory, navigate into `/Library/Java/` (or however deep you
-can) and create a new folder named `JavaVirtualMachines` followed by creating a file named `openjdk-11.jdk`. The folder
-structure after everything is said and done should look like `/Library/Java/JavaVirtualMachines/openjdk-11.jdk`. After
+can) and create a new folder named `JavaVirtualMachines` followed by creating a file named `openjdk-17.jdk`. The folder
+structure after everything is said and done should look like `/Library/Java/JavaVirtualMachines/openjdk-17.jdk`. After
 doing that run the command at the beginning again and this should link the file and allow you to use maven with OpenJDK
-version 11.
+version 17.
+
+When running the tests, you may encounter `OpenSSL` related errors for parts that you may not have even worked on, in 
+which case you need to make sure you are using `OpenSSL` and not LibreSSL which comes by default with macOS.
 
 ### Kubernetes or OpenShift Cluster
 
@@ -90,6 +95,30 @@ to `oc` commands being called on your Minikube cluster then explicitly set the `
 before running the `make` commands.
 
     export TEST_CLUSTER=minikube
+
+## Using an IDE
+### IntelliJ IDEA
+The project includes a lot of code generation which takes place within the maven build process, that is why just importing the project might end up with a lot of `Cannot resolve symbol` errors.
+
+Follow these steps to import the project in IntelliJ IDEA, run code generation and trigger a reindex in IntelliJ.
+
+1. After cloning the repo, open the folder in IntelliJ IDEA.
+2. From the toolbar in the [Maven tool window](https://www.jetbrains.com/help/idea/maven-projects-tool-window.html#toolbar), click on `Generate Sources and Update Folders For All Projects` button to initiate the code generation.
+3. Restart the IDE via **Find Action**: press `Ctrl+Shift+A` and type **Restart IDE**.
+
+Afterwards IntelliJ should no longer have any `Cannot resolve symbol` errors.
+
+Note: After running the Maven build in the terminal you might need to [reload the project](https://www.jetbrains.com/help/idea/delegate-build-and-run-actions-to-maven.html#maven_reimport) from the Maven tool window.
+
+### IDE build problems
+
+The build also uses a Java annotation processor. Some IDEs (such as IntelliJ's IDEA) by default don't run the annotation
+processor in their build process. You can run `mvn clean install -DskipTests` to run the annotation processor
+as part of the `maven` build, and the IDE should then be able to use the generated classes. It is also possible to
+configure the IDE to run the annotation processor directly.
+
+Eclipse users may find the [m2e-apt plugin](https://marketplace.eclipse.org/content/m2e-apt) useful for the automatic
+configuration of Eclipse projects for annotation processing.
 
 ## Build and deploy from source
 
@@ -217,10 +246,7 @@ Commonly used Make targets:
 
 ### Java versions
 
-To use different Java version for the Maven build, you can specify the environment variable `JAVA_VERSION_BUILD` and set
-it to the desired Java version. For example, for building with Java 11 you can use `export JAVA_VERSION_BUILD=11`.
-
-> *Note*: Strimzi currently developed and tested with Java 11.
+Strimzi currently developed and tested with Java 17.
 
 ### Building Docker images
 
@@ -249,12 +275,6 @@ To configure the `docker_tag` and `docker_push` targets you can set following en
 ### Docker build options
 
 When building the Docker images you can use an alternative JRE or use an alternate base image.
-
-#### Alternative Docker image JRE
-
-The docker images can be built with an alternative Java version by setting the environment variable `JAVA_VERSION`. For
-example, to build docker images that have the Java 11 JRE installed use `JAVA_VERSION=11 make docker_build`. If not
-present, the container images will use Java **11** by default.
 
 #### Alternative `docker` command
 
@@ -327,7 +347,7 @@ and pull the official images instead of using your freshly built image.
 
 The `strimzi-kafka-operator` Helm Chart can be installed directly from its source.
 
-    `helm install packaging/helm-charts/helm3/strimzi-kafka-operator`
+    `helm install strimzi-operator packaging/helm-charts/helm3/strimzi-kafka-operator`
 
 The chart is also available in the release artifact as a tarball.
 
@@ -362,16 +382,6 @@ the commit if errors are detected:
 ```
 ./tools/git-hooks/checkstyle-pre-commit
 ```
-
-## IDE build problems
-
-The build also uses a Java annotation processor. Some IDEs (such as IntelliJ's IDEA) by default don't run the annotation
-processor in their build process. You can run `mvn clean install -DskipTests` to run the annotation processor
-as part of the `maven` build, and the IDE should then be able to use the generated classes. It is also possible to
-configure the IDE to run the annotation processor directly.
-
-Eclipse users may find the [m2e-apt plugin](https://marketplace.eclipse.org/content/m2e-apt) useful for the automatic
-configuration of Eclipse projects for annotation processing.
 
 ## Building container images for other platforms with Docker `buildx`
 

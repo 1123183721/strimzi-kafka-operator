@@ -23,31 +23,40 @@ import io.strimzi.certs.OpenSslCertManager;
 import io.strimzi.operator.cluster.model.Ca;
 import io.strimzi.operator.cluster.model.ClientsCa;
 import io.strimzi.operator.cluster.model.InvalidResourceException;
+import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.ReconciliationLogger;
 import io.strimzi.operator.common.Util;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.operator.user.model.acl.SimpleAclRule;
-import io.strimzi.operator.common.PasswordGenerator;
-
 import javax.naming.InvalidNameException;
 import javax.naming.ldap.LdapName;
+
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.Base64;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+/**
+ * Model of the Kafka user which is created based on the KafkaUser custom resource
+ */
 public class KafkaUserModel {
     private static final ReconciliationLogger LOGGER = ReconciliationLogger.create(KafkaUserModel.class.getName());
 
+    /**
+     * Key under which the password is stored in the Kubernetes Secret
+     */
     public static final String KEY_PASSWORD = "password";
+
+    /**
+     * Key under which the SASL configuration is stored in the Kubernetes Secret
+     */
     public static final String KEY_SASL_JAAS_CONFIG = "sasl.jaas.config";
 
     protected final String namespace;
@@ -60,6 +69,9 @@ public class KafkaUserModel {
     protected String scramSha512Password;
     protected Set<SimpleAclRule> simpleAclRules = null;
 
+    /**
+     * Name of the USer Operator used for the Kubernetes labels
+     */
     public static final String KAFKA_USER_OPERATOR_NAME = "strimzi-user-operator";
 
     // Owner Reference information
@@ -162,9 +174,7 @@ public class KafkaUserModel {
      * @param user  The KafkaUser which should be validated
      */
     private static void validateDesiredPassword(KafkaUser user)  {
-        if (user.getSpec().getAuthentication() instanceof KafkaUserScramSha512ClientAuthentication) {
-            KafkaUserScramSha512ClientAuthentication scramAuth = (KafkaUserScramSha512ClientAuthentication) user.getSpec().getAuthentication();
-
+        if (user.getSpec().getAuthentication() instanceof KafkaUserScramSha512ClientAuthentication scramAuth) {
             if (scramAuth.getPassword() != null)    {
                 if (scramAuth.getPassword().getValueFrom() == null
                         || scramAuth.getPassword().getValueFrom().getSecretKeyRef() == null
@@ -213,12 +223,13 @@ public class KafkaUserModel {
      * @param validityDays The number of days the certificate should be valid for.
      * @param renewalDays The renewal days.
      * @param maintenanceWindows List of configured maintenance windows
-     * @param dateSupplier Date supplier used to check whether we are inside a maintenance window or not
+     * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+     *              That time is used for checking maintenance windows
      */
     @SuppressWarnings("checkstyle:BooleanExpressionComplexity")
     public void maybeGenerateCertificates(Reconciliation reconciliation, CertManager certManager, PasswordGenerator passwordGenerator,
                                           Secret clientsCaCertSecret, Secret clientsCaKeySecret, Secret userSecret, int validityDays,
-                                          int renewalDays, List<String> maintenanceWindows, Supplier<Date> dateSupplier) {
+                                          int renewalDays, List<String> maintenanceWindows, Clock clock) {
         validateCACertificates(clientsCaCertSecret, clientsCaKeySecret);
 
         ClientsCa clientsCa = new ClientsCa(
@@ -250,7 +261,7 @@ public class KafkaUserModel {
                     && !userKey.isEmpty()) {
                 if (clientsCa.isExpiring(userSecret, "user.crt"))   {
                     // The certificate exists but is expiring
-                    if (Util.isMaintenanceTimeWindowsSatisfied(reconciliation, maintenanceWindows, dateSupplier))   {
+                    if (Util.isMaintenanceTimeWindowsSatisfied(reconciliation, maintenanceWindows, clock.instant()))   {
                         // => if we are in compliance with maintenance window, we renew it
                         LOGGER.infoCr(reconciliation, "Certificate for user {} in namespace {} is within the renewal period and will be renewed", name, namespace);
                         this.userCertAndKey = generateNewCertificate(reconciliation, clientsCa);
@@ -428,7 +439,7 @@ public class KafkaUserModel {
      * Decodes the name of the User secret based on the username
      *
      * @param username The username.
-     * @return The decoded user name.
+     * @return The decoded username.
      */
     public static String decodeUsername(String username) {
         if (username.contains("CN="))   {
@@ -448,7 +459,7 @@ public class KafkaUserModel {
      * Generates the name of the User secret based on the username
      *
      * @param username The username.
-     * @return The TLS user name.
+     * @return The TLS username.
      */
     public static String getTlsUserName(String username)    {
         return "CN=" + username;
@@ -458,7 +469,7 @@ public class KafkaUserModel {
      * Generates the name of the User secret based on the username
      *
      * @param username The username.
-     * @return The SCRAM user name.
+     * @return The SCRAM username.
      */
     public static String getScramUserName(String username)    {
         return username;
@@ -562,7 +573,7 @@ public class KafkaUserModel {
         Set<SimpleAclRule> simpleAclRules = new HashSet<>();
 
         for (AclRule rule : rules)  {
-            simpleAclRules.add(SimpleAclRule.fromCrd(rule));
+            simpleAclRules.addAll(SimpleAclRule.fromCrd(rule));
         }
 
         this.simpleAclRules = simpleAclRules;

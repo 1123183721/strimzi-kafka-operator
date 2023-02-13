@@ -4,7 +4,6 @@
  */
 package io.strimzi.operator.cluster.model;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import io.fabric8.kubernetes.api.model.Affinity;
 import io.fabric8.kubernetes.api.model.AffinityBuilder;
 import io.fabric8.kubernetes.api.model.ConfigMapKeySelectorBuilder;
@@ -31,7 +30,6 @@ import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicy;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyIngressRule;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeer;
 import io.fabric8.kubernetes.api.model.networking.v1.NetworkPolicyPeerBuilder;
-import io.fabric8.kubernetes.api.model.policy.v1.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.CruiseControlResources;
 import io.strimzi.api.kafka.model.CruiseControlSpec;
@@ -81,7 +79,6 @@ import static io.strimzi.operator.cluster.model.CruiseControl.API_USER_NAME;
 import static io.strimzi.operator.cluster.model.CruiseControl.ENV_VAR_CRUISE_CONTROL_CAPACITY_CONFIGURATION;
 import static io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlConfigurationParameters.ANOMALY_DETECTION_CONFIG_KEY;
 import static io.strimzi.operator.cluster.operator.resource.cruisecontrol.CruiseControlConfigurationParameters.DEFAULT_GOALS_CONFIG_KEY;
-import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
 import static java.util.Collections.singletonMap;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -140,7 +137,8 @@ public class CruiseControlTest {
             .endTemplate()
             .build();
 
-    private final CruiseControl cc = createCruiseControl(createKafka(cruiseControlSpec));
+    private final Kafka kafka = createKafka(cruiseControlSpec);
+    private final CruiseControl cc = createCruiseControl(kafka);
 
     private CruiseControl createCruiseControl(Kafka kafkaAssembly) {
         return CruiseControl.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafkaAssembly, VERSIONS, kafkaAssembly.getSpec().getKafka().getStorage());
@@ -163,7 +161,8 @@ public class CruiseControlTest {
                 "my-user-label", "cromulent",
                 Labels.STRIMZI_KIND_LABEL, Kafka.RESOURCE_KIND,
                 Labels.STRIMZI_NAME_LABEL, name,
-                Labels.KUBERNETES_NAME_LABEL, CruiseControl.APPLICATION_NAME,
+                Labels.STRIMZI_COMPONENT_TYPE_LABEL, CruiseControl.COMPONENT_TYPE,
+                Labels.KUBERNETES_NAME_LABEL, CruiseControl.COMPONENT_TYPE,
                 Labels.KUBERNETES_INSTANCE_LABEL, this.cluster,
                 Labels.KUBERNETES_PART_OF_LABEL, Labels.APPLICATION_NAME + "-" + this.cluster,
                 Labels.KUBERNETES_MANAGED_BY_LABEL, AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
@@ -212,7 +211,7 @@ public class CruiseControlTest {
     }
 
     @ParallelTest
-    public void testBrokerCapacities() throws JsonProcessingException {
+    public void testBrokerCapacities() {
         // Test user defined capacities
         String userDefinedCpuCapacity = "2575m";
 
@@ -368,8 +367,7 @@ public class CruiseControlTest {
 
         assertThat(dep.getMetadata().getName(), is(CruiseControlResources.deploymentName(cluster)));
         assertThat(dep.getMetadata().getNamespace(), is(namespace));
-        assertThat(dep.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(dep.getMetadata().getOwnerReferences().get(0), is(cc.createOwnerReference()));
+        TestUtils.checkOwnerReference(dep, kafka);
 
         // checks on the main Cruise Control container
         Container ccContainer = containers.stream().filter(container -> ccImage.equals(container.getImage())).findFirst().orElseThrow();
@@ -405,7 +403,7 @@ public class CruiseControlTest {
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getSecret().getSecretName(), is(CruiseControlResources.apiSecretName(cluster)));
 
-        volume = volumes.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
+        volume = volumes.stream().filter(vol -> VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volume, is(notNullValue()));
         assertThat(volume.getEmptyDir().getMedium(), is("Memory"));
         assertThat(volume.getEmptyDir().getSizeLimit(), is(new Quantity("100Mi")));
@@ -430,9 +428,9 @@ public class CruiseControlTest {
         assertThat(volumeMount, is(notNullValue()));
         assertThat(volumeMount.getMountPath(), is(CruiseControl.API_AUTH_CONFIG_VOLUME_MOUNT));
 
-        volumeMount = volumesMounts.stream().filter(vol -> AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
+        volumeMount = volumesMounts.stream().filter(vol -> VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME.equals(vol.getName())).findFirst().orElseThrow();
         assertThat(volumeMount, is(notNullValue()));
-        assertThat(volumeMount.getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
+        assertThat(volumeMount.getMountPath(), is(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
     }
 
     @ParallelTest
@@ -526,16 +524,16 @@ public class CruiseControlTest {
         Service svc = cc.generateService();
 
         assertThat(svc.getSpec().getType(), is("ClusterIP"));
-        assertThat(svc.getMetadata().getLabels(), is(expectedLabels(cc.getServiceName())));
+        assertThat(svc.getMetadata().getLabels(), is(expectedLabels(CruiseControlResources.serviceName(cluster))));
         assertThat(svc.getSpec().getSelector(), is(expectedSelectorLabels()));
         assertThat(svc.getSpec().getPorts().size(), is(1));
         assertThat(svc.getSpec().getPorts().get(0).getName(), is(CruiseControl.REST_API_PORT_NAME));
         assertThat(svc.getSpec().getPorts().get(0).getPort(), is(CruiseControl.REST_API_PORT));
         assertThat(svc.getSpec().getPorts().get(0).getProtocol(), is("TCP"));
         assertThat(svc.getSpec().getIpFamilyPolicy(), is(nullValue()));
-        assertThat(svc.getSpec().getIpFamilies(), is(emptyList()));
+        assertThat(svc.getSpec().getIpFamilies(), is(nullValue()));
 
-        TestUtils.checkOwnerReference(cc.createOwnerReference(), svc);
+        TestUtils.checkOwnerReference(svc, kafka);
     }
 
     @ParallelTest
@@ -650,29 +648,6 @@ public class CruiseControlTest {
         ServiceAccount sa = cc.generateServiceAccount();
         assertThat(sa.getMetadata().getLabels().entrySet().containsAll(saLabels.entrySet()), is(true));
         assertThat(sa.getMetadata().getAnnotations().entrySet().containsAll(saAnots.entrySet()), is(true));
-    }
-
-    @ParallelTest
-    public void testPodDisruptionBudget() {
-        int maxUnavailable = 2;
-        CruiseControlSpec cruiseControlSpec = new CruiseControlSpecBuilder()
-                .withImage(ccImage)
-                    .withNewTemplate()
-                        .withNewPodDisruptionBudget()
-                        .withMaxUnavailable(maxUnavailable)
-                    .endPodDisruptionBudget()
-                .endTemplate()
-                .build();
-
-        Kafka resource = createKafka(cruiseControlSpec);
-
-        CruiseControl cc = createCruiseControl(resource);
-
-        PodDisruptionBudget pdb = cc.generatePodDisruptionBudget();
-        assertThat(pdb.getSpec().getMaxUnavailable(), is(new IntOrString(maxUnavailable)));
-
-        io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget pdbV1Beta1 = cc.generatePodDisruptionBudgetV1Beta1();
-        assertThat(pdbV1Beta1.getSpec().getMaxUnavailable(), is(new IntOrString(maxUnavailable)));
     }
 
     @ParallelTest

@@ -58,6 +58,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 
@@ -85,7 +86,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
     private static final String OUTPUT_IMAGE_HASH_STUB = Util.hashStub(OUTPUT_IMAGE);
 
     protected static Vertx vertx;
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_16;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.MINIMAL_SUPPORTED_VERSION;
 
     @BeforeAll
     public static void before() {
@@ -223,7 +224,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -511,7 +512,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -678,7 +679,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                     List<Deployment> capturedDeps = depCaptor.getAllValues();
                     assertThat(capturedDeps, hasSize(1));
                     Deployment dep = capturedDeps.get(0);
-                    assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                    assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                     assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build-2@sha256:blablabla"));
                     assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + Util.hashStub(build.getBuild().getOutput().getImage())));
 
@@ -803,7 +804,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -823,6 +824,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
     }
 
     @Test
+    @SuppressWarnings({"checkstyle:MethodLength"})
     public void testUpdateWithForcedRebuildOnOpenShift(VertxTestContext context) {
         Plugin plugin1 = new PluginBuilder()
                 .withName("plugin1")
@@ -881,9 +883,16 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
         when(mockDepOps.reconcile(any(), anyString(), anyString(), depCaptor.capture())).thenReturn(Future.succeededFuture());
         when(mockDepOps.getAsync(eq(NAMESPACE), eq(KafkaConnectResources.deploymentName(NAME)))).thenAnswer(inv -> {
             Deployment dep = connect.generateDeployment(emptyMap(), false, null, null);
+
+            if (dep.getMetadata().getAnnotations() != null) {
+                dep.getMetadata().getAnnotations().put(Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, "true");
+            } else {
+                dep.getMetadata().setAnnotations(Map.of(Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, "true"));
+            }
+
             dep.getSpec().getTemplate().getMetadata().getAnnotations().put(Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB);
-            dep.getMetadata().getAnnotations().put(Annotations.STRIMZI_IO_CONNECT_FORCE_REBUILD, "true");
             dep.getSpec().getTemplate().getSpec().getContainers().get(0).setImage("my-connect-build@sha256:blablabla");
+
             return Future.succeededFuture(dep);
         });
         when(mockDepOps.scaleUp(any(), anyString(), anyString(), anyInt())).thenReturn(Future.succeededFuture(42));
@@ -951,7 +960,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:rebuiltblablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1143,7 +1152,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1333,7 +1342,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 
@@ -1525,7 +1534,7 @@ public class KafkaConnectBuildAssemblyOperatorOpenShiftTest {
                 List<Deployment> capturedDeps = depCaptor.getAllValues();
                 assertThat(capturedDeps, hasSize(1));
                 Deployment dep = capturedDeps.get(0);
-                assertThat(dep.getMetadata().getName(), is(connect.getName()));
+                assertThat(dep.getMetadata().getName(), is(connect.getComponentName()));
                 assertThat(dep.getSpec().getTemplate().getSpec().getContainers().get(0).getImage(), is("my-connect-build@sha256:blablabla"));
                 assertThat(Annotations.stringAnnotation(dep.getSpec().getTemplate(), Annotations.STRIMZI_IO_CONNECT_BUILD_REVISION, null), is(build.generateDockerfile().hashStub() + OUTPUT_IMAGE_HASH_STUB));
 

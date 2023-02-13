@@ -3,6 +3,7 @@ include::shared/attributes.adoc[]
 
 :context: str
 
+[id="configuring-book_{context}"]
 = Configuring Strimzi
 
 include::assemblies/configuring/assembly-overview.adoc[leveloffset=+1]
@@ -12,21 +13,14 @@ include::assemblies/configuring/assembly-deployment-configuration.adoc[leveloffs
 //Load configuration from external sources for all Kafka components
 include::assemblies/configuring/assembly-external-config.adoc[leveloffset=+1]
 
-include::assemblies/security/assembly-securing-external-listeners.adoc[leveloffset=+1]
-
-include::assemblies/security/assembly-securing-access.adoc[leveloffset=+1]
+//security context for all pods
+include::assemblies/configuring/assembly-security-providers.adoc[leveloffset=+1]
 
 include::assemblies/operators/assembly-operators.adoc[leveloffset=+1]
 
 include::assemblies/cruise-control/assembly-cruise-control-concepts.adoc[leveloffset=+1]
 
-include::assemblies/tracing/assembly-distributed-tracing.adoc[leveloffset=+1]
-
 include::assemblies/security/assembly-security.adoc[leveloffset=+1]
-
-include::assemblies/managing/assembly-management-tasks.adoc[leveloffset=+1]
-
-include::assemblies/managing/assembly-tuning-config.adoc[leveloffset=+1]
 
 [id='api_reference-{context}']
 :parent-context: {context}

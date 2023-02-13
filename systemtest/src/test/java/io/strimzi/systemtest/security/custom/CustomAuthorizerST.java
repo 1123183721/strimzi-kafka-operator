@@ -61,13 +61,7 @@ public class CustomAuthorizerST extends AbstractST {
                         .withNewAclRuleTopicResource()
                             .withName(testStorage.getTopicName())
                         .endAclRuleTopicResource()
-                        .withOperation(AclOperation.WRITE)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName(testStorage.getTopicName())
-                        .endAclRuleTopicResource()
-                        .withOperation(AclOperation.DESCRIBE)
+                        .withOperations(AclOperation.WRITE, AclOperation.DESCRIBE)
                     .endAcl()
                 .endKafkaUserAuthorizationSimple()
             .endSpec()
@@ -80,19 +74,13 @@ public class CustomAuthorizerST extends AbstractST {
                         .withNewAclRuleTopicResource()
                             .withName(testStorage.getTopicName())
                         .endAclRuleTopicResource()
-                        .withOperation(AclOperation.READ)
+                        .withOperations(AclOperation.READ, AclOperation.DESCRIBE)
                     .endAcl()
                     .addNewAcl()
                         .withNewAclRuleGroupResource()
                             .withName(consumerGroupName)
                         .endAclRuleGroupResource()
-                        .withOperation(AclOperation.READ)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName(testStorage.getTopicName())
-                        .endAclRuleTopicResource()
-                        .withOperation(AclOperation.DESCRIBE)
+                        .withOperations(AclOperation.READ)
                     .endAcl()
                 .endKafkaUserAuthorizationSimple()
             .endSpec()
@@ -107,7 +95,7 @@ public class CustomAuthorizerST extends AbstractST {
             .withProducerName(testStorage.getProducerName())
             .withConsumerName(testStorage.getConsumerName())
             .withNamespaceName(testStorage.getNamespaceName())
-            .withMessageCount(MESSAGE_COUNT)
+            .withMessageCount(testStorage.getMessageCount())
             .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(CLUSTER_NAME))
             .withTopicName(testStorage.getTopicName())
             .withUserName(kafkaUserWrite)
@@ -115,22 +103,22 @@ public class CustomAuthorizerST extends AbstractST {
             .build();
 
         resourceManager.createResource(extensionContext, kafkaClients.producerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientSuccess(testStorage.getProducerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForProducerClientSuccess(testStorage);
 
         resourceManager.createResource(extensionContext, kafkaClients.consumerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientTimeout(testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForConsumerClientTimeout(testStorage);
 
         kafkaClients = new KafkaClientsBuilder(kafkaClients)
             .withUserName(kafkaUserRead)
             .build();
 
         resourceManager.createResource(extensionContext, kafkaClients.consumerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientSuccess(testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForConsumerClientSuccess(testStorage);
 
         LOGGER.info("Checking KafkaUser {} that is not able to send messages to topic '{}'", kafkaUserRead, testStorage.getTopicName());
 
         resourceManager.createResource(extensionContext, kafkaClients.producerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientTimeout(testStorage.getProducerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForProducerClientTimeout(testStorage);
     }
 
     @ParallelTest
@@ -147,13 +135,7 @@ public class CustomAuthorizerST extends AbstractST {
                         .withNewAclRuleTopicResource()
                             .withName(testStorage.getTopicName())
                         .endAclRuleTopicResource()
-                        .withOperation(AclOperation.WRITE)
-                    .endAcl()
-                    .addNewAcl()
-                        .withNewAclRuleTopicResource()
-                            .withName(testStorage.getTopicName())
-                        .endAclRuleTopicResource()
-                        .withOperation(AclOperation.DESCRIBE)
+                        .withOperations(AclOperation.WRITE, AclOperation.DESCRIBE)
                     .endAcl()
                 .endKafkaUserAuthorizationSimple()
             .endSpec()
@@ -167,20 +149,20 @@ public class CustomAuthorizerST extends AbstractST {
             .withProducerName(testStorage.getProducerName())
             .withConsumerName(testStorage.getConsumerName())
             .withNamespaceName(testStorage.getNamespaceName())
-            .withMessageCount(MESSAGE_COUNT)
+            .withMessageCount(testStorage.getMessageCount())
             .withBootstrapAddress(KafkaResources.tlsBootstrapAddress(CLUSTER_NAME))
             .withTopicName(testStorage.getTopicName())
             .withUserName(ADMIN)
             .build();
 
         resourceManager.createResource(extensionContext, kafkaClients.producerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientSuccess(testStorage.getProducerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForProducerClientSuccess(testStorage);
 
         LOGGER.info("Checking kafka super user:{} that is able to read messages to topic:{} regardless that " +
             "we configured Acls with only write operation", ADMIN, TOPIC_NAME);
 
         resourceManager.createResource(extensionContext, kafkaClients.consumerTlsStrimzi(CLUSTER_NAME));
-        ClientUtils.waitForClientSuccess(testStorage.getConsumerName(), testStorage.getNamespaceName(), MESSAGE_COUNT);
+        ClientUtils.waitForConsumerClientSuccess(testStorage);
     }
 
     @BeforeAll

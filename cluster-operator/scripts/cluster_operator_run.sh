@@ -2,7 +2,8 @@
 set -e
 
 # Clean-up /tmp directory from files which might have remained from previous container restart
-rm -rfv /tmp/*
+# We ignore any errors which might be caused by files injected by different agents which we do not have the rights to delete
+rm -rfv /tmp/* || true
 
 export JAVA_CLASSPATH=lib/io.strimzi.@project.build.finalName@.@project.packaging@:@project.dist.classpath@
 export JAVA_MAIN=io.strimzi.operator.cluster.Main
@@ -25,6 +26,9 @@ if [ -f /opt/strimzi/custom-config/log4j2.properties ]; then
 else
     echo "Configuration file log4j2.properties not found. Using default static logging setting. Dynamic updates of logging configuration will not work."
 fi
+
+# The java.util.logging.manager is set because of OkHttp client which is using JUL logging
+export JAVA_OPTS="${JAVA_OPTS} -Djava.util.logging.manager=org.apache.logging.log4j.jul.LogManager"
 
 # Used to identify cluster operator instance when publishing events
 if [[ -z "$STRIMZI_OPERATOR_NAME" ]]; then

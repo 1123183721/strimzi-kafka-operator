@@ -42,6 +42,17 @@ public interface KafkaConnectApi {
      */
     Future<Map<String, String>> getConnectorConfig(Reconciliation reconciliation, String host, int port, String connectorName);
 
+    /**
+     * Make a {@code GET} request to {@code /connectors/${connectorName}/config}.
+     *
+     * @param reconciliation    The reconciliation
+     * @param backOff           The backoff parameters
+     * @param host              The host to make the request to.
+     * @param port              The port to make the request to.
+     * @param connectorName     The name of the connector to get the config of.
+     *
+     * @return A Future which completes with the result of the request. If the request was successful, this returns the connector's config.
+     */
     Future<Map<String, String>> getConnectorConfig(Reconciliation reconciliation, BackOff backOff, String host, int port, String connectorName);
 
     /**
@@ -161,12 +172,15 @@ public interface KafkaConnectApi {
 
     /**
      * Make a {@code POST} request to {@code /connectors/${connectorName}/restart}.
-     * @param host The host to make the request to.
-     * @param port The port to make the request to.
+     *
+     * @param host          The host to make the request to.
+     * @param port          The port to make the request to.
      * @param connectorName The name of the connector to restart.
-     * @return A Future which completes with the result of the request.
+     * @param includeTasks  Whether to restart the connector instance and task instances or just the connector.
+     * @param onlyFailed    Specifies whether to restart just the instances with a FAILED status or all instances.
+     * @return A Future which completes with the result of the request and the new status of the connector
      */
-    Future<Void> restart(String host, int port, String connectorName);
+    Future<Map<String, Object>> restart(String host, int port, String connectorName, boolean includeTasks, boolean onlyFailed);
 
     /**
      * Make a {@code POST} request to {@code /connectors/${connectorName}/tasks/${taskID}/restart}.

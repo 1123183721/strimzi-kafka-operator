@@ -6,21 +6,15 @@ package io.strimzi.operator.cluster.model;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import edu.umd.cs.findbugs.annotations.SuppressFBWarnings;
 import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.Container;
-import io.fabric8.kubernetes.api.model.ContainerBuilder;
 import io.fabric8.kubernetes.api.model.EnvVar;
 import io.fabric8.kubernetes.api.model.HasMetadata;
-import io.fabric8.kubernetes.api.model.IntOrString;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
-import io.fabric8.kubernetes.api.model.SecurityContext;
 import io.fabric8.kubernetes.api.model.Volume;
 import io.fabric8.kubernetes.api.model.VolumeMount;
 import io.fabric8.kubernetes.api.model.apps.Deployment;
-import io.fabric8.kubernetes.api.model.apps.DeploymentStrategy;
-import io.fabric8.kubernetes.api.model.apps.DeploymentStrategyBuilder;
-import io.fabric8.kubernetes.api.model.apps.RollingUpdateDeploymentBuilder;
-import io.strimzi.api.kafka.model.ContainerEnvVar;
 import io.strimzi.api.kafka.model.JmxTransResources;
 import io.strimzi.api.kafka.model.JmxTransSpec;
 import io.strimzi.api.kafka.model.Kafka;
@@ -28,9 +22,11 @@ import io.strimzi.api.kafka.model.KafkaJmxAuthenticationPassword;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.Probe;
 import io.strimzi.api.kafka.model.ProbeBuilder;
+import io.strimzi.api.kafka.model.template.DeploymentTemplate;
 import io.strimzi.api.kafka.model.template.JmxTransOutputDefinitionTemplate;
 import io.strimzi.api.kafka.model.template.JmxTransQueryTemplate;
 import io.strimzi.api.kafka.model.template.JmxTransTemplate;
+import io.strimzi.api.kafka.model.template.PodTemplate;
 import io.strimzi.operator.cluster.model.components.JmxTransOutputWriter;
 import io.strimzi.operator.cluster.model.components.JmxTransQueries;
 import io.strimzi.operator.cluster.model.components.JmxTransServer;
@@ -43,31 +39,41 @@ import io.strimzi.operator.common.Util;
 
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/*
+import static io.strimzi.api.kafka.model.template.DeploymentStrategy.ROLLING_UPDATE;
+
+/**
  * Class for handling JmxTrans configuration passed by the user. Used to get the resources needed to create the
  * JmxTrans deployment including: config map, deployment, and service accounts.
  */
+@SuppressWarnings("deprecation") // JMX Trans is deprecated
+@SuppressFBWarnings({"UWF_FIELD_NOT_INITIALIZED_IN_CONSTRUCTOR"}) // Spotbugs is complaining about outputDefinitions and kafkaQueries which are required in the CRD about not being initialized
 public class JmxTrans extends AbstractModel {
-    private static final String APPLICATION_NAME = "jmx-trans";
+    private static final String COMPONENT_TYPE = "jmx-trans";
 
     // Configuration defaults
     private static final String STRIMZI_DEFAULT_JMXTRANS_IMAGE = "STRIMZI_DEFAULT_JMXTRANS_IMAGE";
-    public static final Probe READINESS_PROBE_OPTIONS = new ProbeBuilder().withTimeoutSeconds(5).withInitialDelaySeconds(15).build();
+    private static final Probe READINESS_PROBE_OPTIONS = new ProbeBuilder().withTimeoutSeconds(5).withInitialDelaySeconds(15).build();
     private static final io.strimzi.api.kafka.model.Probe DEFAULT_JMX_TRANS_PROBE = new io.strimzi.api.kafka.model.ProbeBuilder()
             .withInitialDelaySeconds(JmxTransSpec.DEFAULT_HEALTHCHECK_DELAY)
             .withTimeoutSeconds(JmxTransSpec.DEFAULT_HEALTHCHECK_TIMEOUT)
             .build();
 
     // Configuration for mounting `config.json` to be used as Config during run time of the JmxTrans
+    /**
+     * Key under which the JMX Trans configuration is stored in the Config Map
+     */
     public static final String JMXTRANS_CONFIGMAP_KEY = "config.json";
-    public static final String JMXTRANS_VOLUME_NAME = "jmx-config";
+    /* test */ static final String JMXTRANS_VOLUME_NAME = "jmx-config";
+
+    /**
+     * JMX Trans Config Map revision used to trigger rolling update of JMX Trans when the configuration changes
+     */
     public static final String ANNO_JMXTRANS_CONFIG_MAP_HASH = Annotations.STRIMZI_DOMAIN + "config-map-revision";
-    public static final String JMX_FILE_PATH = "/var/lib/jmxtrans";
+    /* test */ static final String JMX_FILE_PATH = "/var/lib/jmxtrans";
 
     protected static final String ENV_VAR_JMXTRANS_LOGGING_LEVEL = "JMXTRANS_LOGGING_LEVEL";
 
@@ -79,8 +85,8 @@ public class JmxTrans extends AbstractModel {
     private List<JmxTransOutputDefinitionTemplate> outputDefinitions;
     private List<JmxTransQueryTemplate> kafkaQueries;
 
-    protected List<ContainerEnvVar> templateContainerEnvVars;
-    protected SecurityContext templateContainerSecurityContext;
+    private DeploymentTemplate templateDeployment;
+    private PodTemplate templatePod;
 
     private static final Map<String, String> DEFAULT_POD_LABELS = new HashMap<>();
     static {
@@ -97,8 +103,8 @@ public class JmxTrans extends AbstractModel {
      * @param resource Kubernetes resource with metadata containing the namespace and cluster name
      */
     protected JmxTrans(Reconciliation reconciliation, HasMetadata resource) {
-        super(reconciliation, resource, APPLICATION_NAME);
-        this.name = JmxTransResources.deploymentName(cluster);
+        super(reconciliation, resource, JmxTransResources.deploymentName(resource.getMetadata().getName()), COMPONENT_TYPE);
+
         this.replicas = 1;
         this.readinessProbeOptions = READINESS_PROBE_OPTIONS;
     }
@@ -131,41 +137,22 @@ public class JmxTrans extends AbstractModel {
             result.kafkaQueries = jmxTransSpec.getKafkaQueries();
             result.outputDefinitions = jmxTransSpec.getOutputDefinitions();
             result.loggingLevel = jmxTransSpec.getLogLevel() == null ? "INFO" : jmxTransSpec.getLogLevel();
-            result.setResources(jmxTransSpec.getResources());
+            result.resources = jmxTransSpec.getResources();
 
             String image = jmxTransSpec.getImage();
             if (image == null) {
                 image = System.getenv().getOrDefault(STRIMZI_DEFAULT_JMXTRANS_IMAGE, "quay.io/strimzi/jmxtrans:latest");
             }
-            result.setImage(image);
-
-            result.setOwnerReference(kafkaAssembly);
+            result.image = image;
 
             if (jmxTransSpec.getTemplate() != null) {
                 JmxTransTemplate template = jmxTransSpec.getTemplate();
 
-                if (template.getDeployment() != null && template.getDeployment().getMetadata() != null)  {
-                    result.templateDeploymentLabels = template.getDeployment().getMetadata().getLabels();
-                    result.templateDeploymentAnnotations = template.getDeployment().getMetadata().getAnnotations();
-                }
-
-                ModelUtils.parsePodTemplate(result, template.getPod());
-
-                if (template.getContainer() != null && template.getContainer().getEnv() != null) {
-                    result.templateContainerEnvVars = template.getContainer().getEnv();
-                }
-
-                if (template.getContainer() != null && template.getContainer().getSecurityContext() != null) {
-                    result.templateContainerSecurityContext = template.getContainer().getSecurityContext();
-                }
-
-                if (template.getServiceAccount() != null && template.getServiceAccount().getMetadata() != null) {
-                    result.templateServiceAccountLabels = template.getServiceAccount().getMetadata().getLabels();
-                    result.templateServiceAccountAnnotations = template.getServiceAccount().getMetadata().getAnnotations();
-                }
+                result.templateDeployment = template.getDeployment();
+                result.templatePod = template.getPod();
+                result.templateServiceAccount = template.getServiceAccount();
+                result.templateContainer = template.getContainer();
             }
-
-            result.templatePodLabels = Util.mergeLabelsOrAnnotations(result.templatePodLabels, DEFAULT_POD_LABELS);
 
             return result;
         } else {
@@ -173,25 +160,36 @@ public class JmxTrans extends AbstractModel {
         }
     }
 
+    /**
+     * Generates the JMX Trans deployment
+     *
+     * @param imagePullPolicy   Image pull policy
+     * @param imagePullSecrets  Image pull secrets
+     *
+     * @return  Kubernetes Deployment with the JMX Trans
+     */
     public Deployment generateDeployment(ImagePullPolicy imagePullPolicy, List<LocalObjectReference> imagePullSecrets) {
-        DeploymentStrategy updateStrategy = new DeploymentStrategyBuilder()
-                .withType("RollingUpdate")
-                .withRollingUpdate(new RollingUpdateDeploymentBuilder()
-                        .withMaxSurge(new IntOrString(1))
-                        .withMaxUnavailable(new IntOrString(0))
-                        .build())
-                .build();
-
-        return createDeployment(
-                updateStrategy,
-                Collections.emptyMap(),
-                Collections.emptyMap(),
-                getMergedAffinity(),
-                getInitContainers(imagePullPolicy),
-                getContainers(imagePullPolicy),
-                getVolumes(),
-                imagePullSecrets,
-                securityProvider.jmxTransPodSecurityContext(new PodSecurityProviderContextImpl(templateSecurityContext))
+        return WorkloadUtils.createDeployment(
+                componentName,
+                namespace,
+                labels,
+                ownerReference,
+                templateDeployment,
+                replicas,
+                WorkloadUtils.deploymentStrategy(TemplateUtils.deploymentStrategy(templateDeployment, ROLLING_UPDATE)),
+                WorkloadUtils.createPodTemplateSpec(
+                        componentName,
+                        labels,
+                        templatePod,
+                        DEFAULT_POD_LABELS,
+                        Map.of(),
+                        templatePod != null ? templatePod.getAffinity() : null,
+                        null,
+                        List.of(createContainer(imagePullPolicy)),
+                        getVolumes(),
+                        imagePullSecrets,
+                        securityProvider.jmxTransPodSecurityContext(new PodSecurityProviderContextImpl(templatePod))
+                )
         );
     }
 
@@ -298,13 +296,13 @@ public class JmxTrans extends AbstractModel {
         Map<String, String> data = new HashMap<>(1);
         data.put(JMXTRANS_CONFIGMAP_KEY, generateJMXConfig());
 
-        return createConfigMap(JmxTransResources.configMapName(cluster), data);
+        return ConfigMapUtils.createConfigMap(JmxTransResources.configMapName(cluster), namespace, labels, ownerReference, data);
     }
 
-    public List<Volume> getVolumes() {
+    private List<Volume> getVolumes() {
         List<Volume> volumes = new ArrayList<>(2);
 
-        volumes.add(createTempDirVolume());
+        volumes.add(VolumeUtils.createTempDirVolume(templatePod));
         volumes.add(VolumeUtils.createConfigMapVolume(JMXTRANS_VOLUME_NAME, JmxTransResources.configMapName(cluster)));
 
         return volumes;
@@ -313,57 +311,43 @@ public class JmxTrans extends AbstractModel {
     private List<VolumeMount> getVolumeMounts() {
         List<VolumeMount> volumeMountList = new ArrayList<>(2);
 
-        volumeMountList.add(createTempDirVolumeMount());
+        volumeMountList.add(VolumeUtils.createTempDirVolumeMount());
         volumeMountList.add(VolumeUtils.createVolumeMount(JMXTRANS_VOLUME_NAME, JMX_FILE_PATH));
         return volumeMountList;
     }
 
-    @Override
-    protected List<Container> getContainers(ImagePullPolicy imagePullPolicy) {
-        List<Container> containers = new ArrayList<>(1);
-        Container container = new ContainerBuilder()
-                .withName(name)
-                .withImage(getImage())
-                .withEnv(getEnvVars())
-                .withReadinessProbe(jmxTransReadinessProbe(readinessProbeOptions, cluster))
-                .withResources(getResources())
-                .withVolumeMounts(getVolumeMounts())
-                .withImagePullPolicy(determineImagePullPolicy(imagePullPolicy, getImage()))
-                .withSecurityContext(securityProvider.jmxTransContainerSecurityContext(new ContainerSecurityProviderContextImpl(templateContainerSecurityContext)))
-                .build();
-
-        containers.add(container);
-
-        return containers;
+    /* test */ Container createContainer(ImagePullPolicy imagePullPolicy) {
+        return ContainerUtils.createContainer(
+                componentName,
+                image,
+                null,
+                securityProvider.jmxTransContainerSecurityContext(new ContainerSecurityProviderContextImpl(templateContainer)),
+                resources,
+                getEnvVars(),
+                null,
+                getVolumeMounts(),
+                null,
+                jmxTransReadinessProbe(readinessProbeOptions, cluster),
+                imagePullPolicy
+        );
     }
 
-    @Override
     protected List<EnvVar> getEnvVars() {
         List<EnvVar> varList = new ArrayList<>();
 
         if (isJmxAuthenticated) {
-            varList.add(buildEnvVarFromSecret(KafkaCluster.ENV_VAR_KAFKA_JMX_USERNAME, KafkaResources.kafkaJmxSecretName(cluster), KafkaCluster.SECRET_JMX_USERNAME_KEY));
-            varList.add(buildEnvVarFromSecret(KafkaCluster.ENV_VAR_KAFKA_JMX_PASSWORD, KafkaResources.kafkaJmxSecretName(cluster), KafkaCluster.SECRET_JMX_PASSWORD_KEY));
+            varList.add(ContainerUtils.createEnvVarFromSecret(KafkaCluster.ENV_VAR_KAFKA_JMX_USERNAME, KafkaResources.kafkaJmxSecretName(cluster), KafkaCluster.SECRET_JMX_USERNAME_KEY));
+            varList.add(ContainerUtils.createEnvVarFromSecret(KafkaCluster.ENV_VAR_KAFKA_JMX_PASSWORD, KafkaResources.kafkaJmxSecretName(cluster), KafkaCluster.SECRET_JMX_PASSWORD_KEY));
         }
 
-        varList.add(buildEnvVar(ENV_VAR_JMXTRANS_LOGGING_LEVEL, loggingLevel));
+        varList.add(ContainerUtils.createEnvVar(ENV_VAR_JMXTRANS_LOGGING_LEVEL, loggingLevel));
 
         // Add shared environment variables used for all containers
-        varList.addAll(getRequiredEnvVars());
+        varList.addAll(ContainerUtils.requiredEnvVars());
 
-        addContainerEnvsToExistingEnvs(varList, templateContainerEnvVars);
+        ContainerUtils.addContainerEnvsToExistingEnvs(reconciliation, varList, templateContainer);
 
         return varList;
-    }
-
-    @Override
-    protected String getDefaultLogConfigFileName() {
-        return null;
-    }
-
-    @Override
-    protected String getServiceAccountName() {
-        return JmxTransResources.serviceAccountName(cluster);
     }
 
     protected static io.fabric8.kubernetes.api.model.Probe jmxTransReadinessProbe(io.strimzi.api.kafka.model.Probe  kafkaJmxMetricsReadinessProbe, String clusterName) {

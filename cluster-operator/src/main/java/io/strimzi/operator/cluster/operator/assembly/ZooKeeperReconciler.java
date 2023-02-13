@@ -11,7 +11,6 @@ import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.Secret;
 import io.fabric8.kubernetes.api.model.apps.StatefulSet;
-import io.fabric8.kubernetes.api.model.policy.v1.PodDisruptionBudget;
 import io.strimzi.api.kafka.model.Kafka;
 import io.strimzi.api.kafka.model.KafkaResources;
 import io.strimzi.api.kafka.model.StrimziPodSet;
@@ -29,7 +28,6 @@ import io.strimzi.operator.cluster.model.ModelUtils;
 import io.strimzi.operator.cluster.model.ZookeeperCluster;
 import io.strimzi.operator.cluster.operator.resource.ResourceOperatorSupplier;
 import io.strimzi.operator.cluster.operator.resource.StatefulSetOperator;
-import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
 import io.strimzi.operator.cluster.operator.resource.ZooKeeperRoller;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperLeaderFinder;
 import io.strimzi.operator.cluster.operator.resource.ZookeeperScaler;
@@ -50,19 +48,19 @@ import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceAccountOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
 import io.strimzi.operator.common.operator.resource.StorageClassOperator;
+import io.strimzi.operator.common.operator.resource.StrimziPodSetOperator;
 import io.vertx.core.Future;
 import io.vertx.core.Promise;
 import io.vertx.core.Vertx;
 
+import java.time.Clock;
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -181,11 +179,12 @@ public class ZooKeeperReconciler {
      * expected to be called from the outside to trigger the reconciliation.
      *
      * @param kafkaStatus   The Kafka Status class for adding conditions to it during the reconciliation
-     * @param dateSupplier  Date supplier for checking maintenance windows
+     * @param clock         The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+     *                      That time is used for checking maintenance windows
      *
      * @return              Future which completes when the reconciliation completes
      */
-    public Future<Void> reconcile(KafkaStatus kafkaStatus, Supplier<Date> dateSupplier)    {
+    public Future<Void> reconcile(KafkaStatus kafkaStatus, Clock clock)    {
         return modelWarnings(kafkaStatus)
                 .compose(i -> jmxSecret())
                 .compose(i -> manualPodCleaning())
@@ -196,10 +195,12 @@ public class ZooKeeperReconciler {
                 .compose(i -> pvcs())
                 .compose(i -> service())
                 .compose(i -> headlessService())
-                .compose(i -> certificateSecret(dateSupplier))
+                .compose(i -> certificateSecret(clock))
                 .compose(i -> loggingAndMetricsConfigMap())
                 .compose(i -> podDisruptionBudget())
                 .compose(i -> podDisruptionBudgetV1Beta1())
+                .compose(i -> migrateFromStatefulSetToPodSet())
+                .compose(i -> migrateFromPodSetToStatefulSet())
                 .compose(i -> statefulSet())
                 .compose(i -> podSet())
                 .compose(i -> scaleDown())
@@ -436,16 +437,17 @@ public class ZooKeeperReconciler {
     /**
      * Manages the Secret with the node certificates used by the ZooKeeper nodes.
      *
-     * @param dateSupplier  Date supplier for checking the maintenance windows
+     * @param clock The clock for supplying the reconciler with the time instant of each reconciliation cycle.
+     *              That time is used for checking maintenance windows
      *
-     * @return  Completes when the Secret was successfully created or updated
+     * @return      Completes when the Secret was successfully created or updated
      */
-    protected Future<Void> certificateSecret(Supplier<Date> dateSupplier) {
+    protected Future<Void> certificateSecret(Clock clock) {
         return secretOperator.getAsync(reconciliation.namespace(), KafkaResources.zookeeperSecretName(reconciliation.name()))
                 .compose(oldSecret -> {
                     return secretOperator
                             .reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperSecretName(reconciliation.name()),
-                                    zk.generateCertificatesSecret(clusterCa, Util.isMaintenanceTimeWindowsSatisfied(reconciliation, maintenanceWindows, dateSupplier)))
+                                    zk.generateCertificatesSecret(clusterCa, Util.isMaintenanceTimeWindowsSatisfied(reconciliation, maintenanceWindows, clock.instant())))
                             .compose(patchResult -> {
                                 if (patchResult instanceof ReconcileResult.Patched) {
                                     // The secret is patched and some changes to the existing certificates actually occurred
@@ -485,15 +487,8 @@ public class ZooKeeperReconciler {
         if (!pfa.hasPodDisruptionBudgetV1()) {
             return Future.succeededFuture();
         } else {
-            PodDisruptionBudget pdb;
-
-            if (featureGates.useStrimziPodSetsEnabled()) {
-                pdb = zk.generateCustomControllerPodDisruptionBudget();
-            } else {
-                pdb = zk.generatePodDisruptionBudget();
-            }
-
-            return podDisruptionBudgetOperator.reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()), pdb)
+            return podDisruptionBudgetOperator
+                    .reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()), zk.generatePodDisruptionBudget(featureGates.useStrimziPodSetsEnabled()))
                     .map((Void) null);
         }
     }
@@ -507,26 +502,41 @@ public class ZooKeeperReconciler {
         if (pfa.hasPodDisruptionBudgetV1()) {
             return Future.succeededFuture();
         } else {
-            io.fabric8.kubernetes.api.model.policy.v1beta1.PodDisruptionBudget pdb;
-
-            if (featureGates.useStrimziPodSetsEnabled()) {
-                pdb = zk.generateCustomControllerPodDisruptionBudgetV1Beta1();
-            } else {
-                pdb = zk.generatePodDisruptionBudgetV1Beta1();
-            }
-
-            return podDisruptionBudgetV1Beta1Operator.reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()), pdb)
+            return podDisruptionBudgetV1Beta1Operator
+                    .reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()), zk.generatePodDisruptionBudgetV1Beta1(featureGates.useStrimziPodSetsEnabled()))
                     .map((Void) null);
         }
     }
 
     /**
-     * Create or update the StatefulSet for the ZooKeeper cluster. When StatefulSets are disabled, it will try to delete
-     * the old StatefulSet.
+     * Create or update the StatefulSet for the ZooKeeper cluster.
      *
      * @return  Future which completes when the StatefulSet is created, updated or deleted
      */
     protected Future<Void> statefulSet() {
+        if (!featureGates.useStrimziPodSetsEnabled())   {
+            // StatefulSets are enabled => make sure the StatefulSet exists with the right settings
+            StatefulSet zkSts = zk.generateStatefulSet(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets);
+            Annotations.annotations(zkSts.getSpec().getTemplate()).put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, String.valueOf(ModelUtils.caCertGeneration(this.clusterCa)));
+            Annotations.annotations(zkSts.getSpec().getTemplate()).put(Annotations.ANNO_STRIMZI_LOGGING_HASH, loggingHash);
+            return stsOperator.reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()), zkSts)
+                    .compose(rr -> {
+                        statefulSetDiff = rr;
+                        return Future.succeededFuture();
+                    });
+        } else {
+            return Future.succeededFuture();
+        }
+    }
+
+    /**
+     * Helps with the migration from StatefulSets to StrimziPodSets when the cluster is switching between them. When the
+     * switch happens, it deletes the old StatefulSet. It should happen before the new PodSet is created to
+     * allow the controller hand-off.
+     *
+     * @return          Future which completes when the StatefulSet is deleted or does not need to be deleted
+     */
+    protected Future<Void> migrateFromStatefulSetToPodSet() {
         if (featureGates.useStrimziPodSetsEnabled())   {
             // StatefulSets are disabled => delete the StatefulSet if it exists
             return stsOperator.getAsync(reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()))
@@ -538,15 +548,7 @@ public class ZooKeeperReconciler {
                         }
                     });
         } else {
-            // StatefulSets are enabled => make sure the StatefulSet exists with the right settings
-            StatefulSet zkSts = zk.generateStatefulSet(pfa.isOpenshift(), imagePullPolicy, imagePullSecrets);
-            Annotations.annotations(zkSts.getSpec().getTemplate()).put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, String.valueOf(ModelUtils.caCertGeneration(this.clusterCa)));
-            Annotations.annotations(zkSts.getSpec().getTemplate()).put(Annotations.ANNO_STRIMZI_LOGGING_HASH, loggingHash);
-            return stsOperator.reconcile(reconciliation, reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()), zkSts)
-                    .compose(rr -> {
-                        statefulSetDiff = rr;
-                        return Future.succeededFuture();
-                    });
+            return Future.succeededFuture();
         }
     }
 
@@ -571,6 +573,7 @@ public class ZooKeeperReconciler {
      */
     private Future<Void> podSet(int replicas) {
         if (featureGates.useStrimziPodSetsEnabled())   {
+            // StrimziPodSets are enabled => make sure the StrimziPodSet exists
             Map<String, String> podAnnotations = new LinkedHashMap<>(2);
             podAnnotations.put(Ca.ANNO_STRIMZI_IO_CLUSTER_CA_CERT_GENERATION, String.valueOf(ModelUtils.caCertGeneration(this.clusterCa)));
             podAnnotations.put(Annotations.ANNO_STRIMZI_LOGGING_HASH, loggingHash);
@@ -582,6 +585,20 @@ public class ZooKeeperReconciler {
                         return Future.succeededFuture();
                     });
         } else {
+            return Future.succeededFuture();
+        }
+    }
+
+    /**
+     * Helps with the migration from StrimziPodSets to StatefulSets when the cluster is switching between them. When the
+     * switch happens, it deletes the old StrimziPodSet. It needs to happen before the StatefulSet is created to allow
+     * the controller hand-off (STS will not accept pods with another controller in owner references).
+     *
+     * @return          Future which completes when the PodSet is deleted or does not need to be deleted
+     */
+    protected Future<Void> migrateFromPodSetToStatefulSet() {
+        if (!featureGates.useStrimziPodSetsEnabled())   {
+            // StrimziPodSets are disabled => delete the StrimziPodSet if it exists
             return strimziPodSetOperator.getAsync(reconciliation.namespace(), KafkaResources.zookeeperStatefulSetName(reconciliation.name()))
                     .compose(podSet -> {
                         if (podSet != null)    {
@@ -590,6 +607,8 @@ public class ZooKeeperReconciler {
                             return Future.succeededFuture();
                         }
                     });
+        } else {
+            return Future.succeededFuture();
         }
     }
 

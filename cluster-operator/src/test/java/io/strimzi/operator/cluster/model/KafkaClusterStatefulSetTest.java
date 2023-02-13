@@ -5,12 +5,10 @@
 package io.strimzi.operator.cluster.model;
 
 import io.fabric8.kubernetes.api.model.Container;
-import io.fabric8.kubernetes.api.model.HasMetadata;
 import io.fabric8.kubernetes.api.model.HostAlias;
 import io.fabric8.kubernetes.api.model.HostAliasBuilder;
 import io.fabric8.kubernetes.api.model.LabelSelectorBuilder;
 import io.fabric8.kubernetes.api.model.LocalObjectReference;
-import io.fabric8.kubernetes.api.model.OwnerReference;
 import io.fabric8.kubernetes.api.model.PersistentVolumeClaim;
 import io.fabric8.kubernetes.api.model.PodSecurityContext;
 import io.fabric8.kubernetes.api.model.PodSecurityContextBuilder;
@@ -33,6 +31,7 @@ import io.strimzi.api.kafka.model.storage.PersistentClaimStorageBuilder;
 import io.strimzi.api.kafka.model.template.PodManagementPolicy;
 import io.strimzi.operator.PlatformFeaturesAvailability;
 import io.strimzi.operator.cluster.KafkaVersionTestUtils;
+import io.strimzi.operator.common.Annotations;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.model.Labels;
 import io.strimzi.platform.KubernetesVersion;
@@ -98,17 +97,13 @@ public class KafkaClusterStatefulSetTest {
     // Utility methods
     //////////
 
-    private void checkOwnerReference(OwnerReference ownerRef, HasMetadata resource)  {
-        assertThat(resource.getMetadata().getOwnerReferences().size(), is(1));
-        assertThat(resource.getMetadata().getOwnerReferences().get(0), is(ownerRef));
-    }
-
     private Map<String, String> expectedLabels()    {
         return TestUtils.map(
             Labels.STRIMZI_CLUSTER_LABEL, CLUSTER,
             Labels.STRIMZI_NAME_LABEL, KafkaResources.kafkaStatefulSetName(CLUSTER),
+            Labels.STRIMZI_COMPONENT_TYPE_LABEL, KafkaCluster.COMPONENT_TYPE,
             Labels.STRIMZI_KIND_LABEL, Kafka.RESOURCE_KIND,
-            Labels.KUBERNETES_NAME_LABEL, KafkaCluster.APPLICATION_NAME,
+            Labels.KUBERNETES_NAME_LABEL, KafkaCluster.COMPONENT_TYPE,
             Labels.KUBERNETES_INSTANCE_LABEL, CLUSTER,
             Labels.KUBERNETES_PART_OF_LABEL, Labels.APPLICATION_NAME + "-" + CLUSTER,
             Labels.KUBERNETES_MANAGED_BY_LABEL, AbstractModel.STRIMZI_CLUSTER_OPERATOR_NAME);
@@ -120,7 +115,7 @@ public class KafkaClusterStatefulSetTest {
         assertThat(sts.getMetadata().getNamespace(), is(NAMESPACE));
         // ... with these labels
         assertThat(sts.getMetadata().getLabels(), is(expectedLabels()));
-        assertThat(sts.getMetadata().getAnnotations().get(AbstractModel.ANNO_STRIMZI_IO_STORAGE), is(ModelUtils.encodeStorageToJson(kafka.getSpec().getKafka().getStorage())));
+        assertThat(sts.getMetadata().getAnnotations().get(Annotations.ANNO_STRIMZI_IO_STORAGE), is(ModelUtils.encodeStorageToJson(kafka.getSpec().getKafka().getStorage())));
         assertThat(sts.getSpec().getSelector().getMatchLabels(), is(expectedSelectorLabels()));
 
         assertThat(sts.getSpec().getTemplate().getSpec().getSchedulerName(), is("default-scheduler"));
@@ -137,9 +132,9 @@ public class KafkaClusterStatefulSetTest {
         assertThat(containers.get(0).getLivenessProbe().getInitialDelaySeconds(), is(15));
         assertThat(containers.get(0).getReadinessProbe().getTimeoutSeconds(), is(5));
         assertThat(containers.get(0).getReadinessProbe().getInitialDelaySeconds(), is(15));
-        assertThat(AbstractModel.containerEnvVars(containers.get(0)).get(KafkaCluster.ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED), is(Boolean.toString(AbstractModel.DEFAULT_JVM_GC_LOGGING_ENABLED)));
-        assertThat(containers.get(0).getVolumeMounts().get(1).getName(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME));
-        assertThat(containers.get(0).getVolumeMounts().get(1).getMountPath(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
+        assertThat(io.strimzi.operator.cluster.TestUtils.containerEnvVars(containers.get(0)).get(KafkaCluster.ENV_VAR_STRIMZI_KAFKA_GC_LOG_ENABLED), is(Boolean.toString(AbstractModel.DEFAULT_JVM_GC_LOGGING_ENABLED)));
+        assertThat(containers.get(0).getVolumeMounts().get(1).getName(), is(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME));
+        assertThat(containers.get(0).getVolumeMounts().get(1).getMountPath(), is(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_MOUNT_PATH));
         assertThat(containers.get(0).getVolumeMounts().get(3).getName(), is(KafkaCluster.BROKER_CERTS_VOLUME));
         assertThat(containers.get(0).getVolumeMounts().get(3).getMountPath(), is(KafkaCluster.BROKER_CERTS_VOLUME_MOUNT));
         assertThat(containers.get(0).getVolumeMounts().get(2).getName(), is(KafkaCluster.CLUSTER_CA_CERTS_VOLUME));
@@ -154,7 +149,7 @@ public class KafkaClusterStatefulSetTest {
         assertThat(containers.get(0).getPorts().get(1).getProtocol(), is("TCP"));
         assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().stream()
             .filter(volume -> volume.getName().equalsIgnoreCase("strimzi-tmp"))
-            .findFirst().orElseThrow().getEmptyDir().getSizeLimit(), is(new Quantity(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_SIZE)));
+            .findFirst().orElseThrow().getEmptyDir().getSizeLimit(), is(new Quantity(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_SIZE)));
 
         if (kafka.getSpec().getKafka().getRack() != null) {
             Rack rack = kafka.getSpec().getKafka().getRack();
@@ -196,13 +191,11 @@ public class KafkaClusterStatefulSetTest {
         // We expect a single statefulSet ...
         StatefulSet sts = KC.generateStatefulSet(true, null, null, null);
         checkStatefulSet(sts, KAFKA);
-        checkOwnerReference(KC.createOwnerReference(), sts);
-
-        System.out.println(sts.getSpec().getTemplate().getSpec().getVolumes());
+        TestUtils.checkOwnerReference(sts, KAFKA);
 
         // Check Volumes
         assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().size(), is(6));
-        assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().get(0).getName(), is(AbstractModel.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME));
+        assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().get(0).getName(), is(VolumeUtils.STRIMZI_TMP_DIRECTORY_DEFAULT_VOLUME_NAME));
         assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().get(0).getEmptyDir(), is(notNullValue()));
         assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().get(1).getName(), is(KafkaCluster.CLUSTER_CA_CERTS_VOLUME));
         assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().get(1).getSecret().getSecretName(), is("foo-cluster-ca-cert"));
@@ -552,7 +545,8 @@ public class KafkaClusterStatefulSetTest {
 
     @ParallelTest
     public void testDefaultSecurityContext() {
-        StatefulSet sts = KC.generateStatefulSet(true, null, null, null);
+        StatefulSet sts = KC.generateStatefulSet(false, null, null, null);
+        assertThat(sts.getSpec().getTemplate().getSpec().getSecurityContext(), is(notNullValue()));
         assertThat(sts.getSpec().getTemplate().getSpec().getSecurityContext().getFsGroup(), is(0L));
         assertThat(sts.getSpec().getTemplate().getSpec().getContainers().get(0).getSecurityContext(), is(nullValue()));
     }
@@ -590,7 +584,7 @@ public class KafkaClusterStatefulSetTest {
 
         // Check Storage annotation on STS
         StatefulSet sts = kc.generateStatefulSet(true, ImagePullPolicy.NEVER, null, null);
-        assertThat(sts.getMetadata().getAnnotations().get(AbstractModel.ANNO_STRIMZI_IO_STORAGE), is(ModelUtils.encodeStorageToJson(kafkaAssembly.getSpec().getKafka().getStorage())));
+        assertThat(sts.getMetadata().getAnnotations().get(Annotations.ANNO_STRIMZI_IO_STORAGE), is(ModelUtils.encodeStorageToJson(kafkaAssembly.getSpec().getKafka().getStorage())));
         assertThat(sts.getSpec().getTemplate().getSpec().getVolumes().stream().filter(v -> "data".equals(v.getName())).findFirst().orElseThrow().getEmptyDir(), is(notNullValue()));
 
         // Check PVCs
@@ -623,7 +617,7 @@ public class KafkaClusterStatefulSetTest {
                 .build();
 
         KafkaCluster kc = KafkaCluster.fromCrd(Reconciliation.DUMMY_RECONCILIATION, kafkaAssembly, VERSIONS);
-        assertThat(kc.templateKafkaContainerSecurityContext, is(securityContext));
+        assertThat(kc.createContainer(null).getSecurityContext(), is(securityContext));
 
         StatefulSet sts = kc.generateStatefulSet(false, null, null, null);
 

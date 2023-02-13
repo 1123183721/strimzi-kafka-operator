@@ -36,7 +36,6 @@ import io.strimzi.operator.common.PasswordGenerator;
 import io.strimzi.operator.common.Reconciliation;
 import io.strimzi.operator.common.operator.MockCertManager;
 import io.strimzi.operator.common.operator.resource.IngressOperator;
-import io.strimzi.operator.common.operator.resource.IngressV1Beta1Operator;
 import io.strimzi.operator.common.operator.resource.RouteOperator;
 import io.strimzi.operator.common.operator.resource.SecretOperator;
 import io.strimzi.operator.common.operator.resource.ServiceOperator;
@@ -44,6 +43,7 @@ import io.strimzi.platform.KubernetesVersion;
 import io.strimzi.test.mockkube2.MockKube2;
 import io.vertx.core.Future;
 import io.vertx.core.Vertx;
+import io.vertx.core.WorkerExecutor;
 import io.vertx.junit5.Checkpoint;
 import io.vertx.junit5.VertxExtension;
 import io.vertx.junit5.VertxTestContext;
@@ -55,13 +55,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.function.Supplier;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -73,7 +72,7 @@ import static org.hamcrest.Matchers.not;
 @EnableKubernetesMockClient(crud = true)
 @ExtendWith(VertxExtension.class)
 public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
-    private final KubernetesVersion kubernetesVersion = KubernetesVersion.V1_18;
+    private final KubernetesVersion kubernetesVersion = KubernetesVersion.MINIMAL_SUPPORTED_VERSION;
     private final MockCertManager certManager = new MockCertManager();
     private final PasswordGenerator passwordGenerator = new PasswordGenerator(10, "a", "a");
     private final ClusterOperatorConfig config = ResourceUtils.dummyClusterOperatorConfig(VERSIONS, ClusterOperatorConfig.DEFAULT_OPERATION_TIMEOUT_MS, "-UseStrimziPodSets");
@@ -81,6 +80,7 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
     private final String namespace = "testns";
     private final String clusterName = "testkafka";
     protected static Vertx vertx;
+    private static WorkerExecutor sharedWorkerExecutor;
 
     private Kafka kafka;
     private KafkaAssemblyOperator operator;
@@ -95,6 +95,7 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
     @BeforeAll
     public static void before() {
         vertx = Vertx.vertx();
+        sharedWorkerExecutor = vertx.createSharedWorkerExecutor("kubernetes-ops-pool");
     }
 
     @BeforeEach
@@ -122,7 +123,7 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
             .build();
         client.secrets().inNamespace(namespace).resource(secret).create();
         PlatformFeaturesAvailability platformFeaturesAvailability = new PlatformFeaturesAvailability(false, kubernetesVersion);
-        ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(vertx, client, platformFeaturesAvailability, 10000, "op");
+        ResourceOperatorSupplier supplier = new ResourceOperatorSupplier(vertx, client, ResourceUtils.metricsProvider(), platformFeaturesAvailability, 10000, "op");
 
         operator = new MockKafkaAssemblyOperator(
                 vertx,
@@ -141,6 +142,7 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
 
     @AfterAll
     public static void after() {
+        sharedWorkerExecutor.close();
         vertx.close();
     }
 
@@ -344,7 +346,7 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
         }
 
         @Override
-        public Future<Void> reconcile(KafkaStatus kafkaStatus, Supplier<Date> dateSupplier)    {
+        public Future<Void> reconcile(KafkaStatus kafkaStatus, Clock clock)    {
             return listeners()
                     .compose(i -> statefulSet())
                     .compose(i -> podSet())
@@ -353,7 +355,7 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
 
         @Override
         protected KafkaListenersReconciler listenerReconciler()   {
-            return new MockKafkaListenersReconciler(reconciliation, kafka, pfa, secretOperator, serviceOperator, routeOperator, ingressOperator, ingressV1Beta1Operator);
+            return new MockKafkaListenersReconciler(reconciliation, kafka, pfa, secretOperator, serviceOperator, routeOperator, ingressOperator);
         }
 
         @Override
@@ -380,9 +382,8 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
                 SecretOperator secretOperator,
                 ServiceOperator serviceOperator,
                 RouteOperator routeOperator,
-                IngressOperator ingressOperator,
-                IngressV1Beta1Operator ingressV1Beta1Operator) {
-            super(reconciliation, kafka, null, pfa, 300_000L, secretOperator, serviceOperator, routeOperator, ingressOperator, ingressV1Beta1Operator);
+                IngressOperator ingressOperator) {
+            super(reconciliation, kafka, null, pfa, 300_000L, secretOperator, serviceOperator, routeOperator, ingressOperator);
         }
 
         @Override
@@ -430,8 +431,8 @@ public class KafkaAssemblyOperatorCustomCertStatefulSetMockTest {
 
         @Override
         Future<Void> reconcile(ReconciliationState reconcileState)  {
-            return reconcileState.reconcileCas(this::dateSupplier)
-                    .compose(state -> state.reconcileKafka(this::dateSupplier))
+            return reconcileState.reconcileCas(clock)
+                    .compose(state -> state.reconcileKafka(clock))
                     .map((Void) null);
         }
     }

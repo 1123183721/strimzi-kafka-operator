@@ -36,6 +36,10 @@ import io.fabric8.kubernetes.client.dsl.PodResource;
 import io.fabric8.kubernetes.client.dsl.RollableScalableResource;
 import io.fabric8.kubernetes.client.dsl.base.PatchContext;
 import io.fabric8.kubernetes.client.dsl.base.PatchType;
+import io.fabric8.openshift.api.model.operatorhub.v1alpha1.ClusterServiceVersion;
+import io.fabric8.openshift.api.model.operatorhub.v1alpha1.InstallPlan;
+import io.fabric8.openshift.api.model.operatorhub.v1alpha1.InstallPlanBuilder;
+import io.fabric8.openshift.client.OpenShiftClient;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -89,6 +93,10 @@ public class KubeClient {
     public void createNamespace(String name) {
         Namespace ns = new NamespaceBuilder().withNewMetadata().withName(name).endMetadata().build();
         client.namespaces().resource(ns).createOrReplace();
+    }
+
+    public void createOrReplaceNamespace(final Namespace namespace) {
+        client.namespaces().resource(namespace).createOrReplace();
     }
 
     public void deleteNamespace(String name) {
@@ -147,7 +155,11 @@ public class KubeClient {
     // =========================
 
     public PodResource editPod(String podName) {
-        return client.pods().inNamespace(getNamespace()).withName(podName);
+        return editPod(getNamespace(), podName);
+    }
+
+    public PodResource editPod(String namespaceName, String podName) {
+        return client.pods().inNamespace(namespaceName).withName(podName);
     }
 
     public String execInPod(String podName, String container, String... command) {
@@ -390,10 +402,6 @@ public class KubeClient {
         return client.apps().deployments().inNamespace(namespaceName).withName(deploymentName).get();
     }
 
-    public Deployment getDeployment(String deploymentName) {
-        return getDeployment(kubeClient().getNamespace(), deploymentName);
-    }
-
     public String getDeploymentNameByPrefix(String namePrefix) {
         List<Deployment> prefixDeployments = client.apps().deployments().inNamespace(getNamespace()).list().getItems().stream().filter(
             rs -> rs.getMetadata().getName().startsWith(namePrefix)).collect(Collectors.toList());
@@ -408,8 +416,8 @@ public class KubeClient {
     /**
      * Gets deployment UID
      */
-    public String getDeploymentUid(String deploymentName) {
-        return getDeployment(deploymentName).getMetadata().getUid();
+    public String getDeploymentUid(String namespaceName, String deploymentName) {
+        return getDeployment(namespaceName, deploymentName).getMetadata().getUid();
     }
 
     /**
@@ -432,10 +440,6 @@ public class KubeClient {
 
     public void deleteDeployment(String namespaceName, String deploymentName) {
         client.apps().deployments().inNamespace(namespaceName).withName(deploymentName).withPropagationPolicy(DeletionPropagation.FOREGROUND).delete();
-    }
-
-    public void deleteDeployment(String deploymentName) {
-        deleteDeployment(kubeClient().getNamespace(), deploymentName);
     }
 
     public void createOrReplaceDeployment(Deployment deployment) {
@@ -492,16 +496,19 @@ public class KubeClient {
     }
 
     public boolean checkSucceededJobStatus(String namespaceName, String jobName, int expectedSucceededPods) {
-        return getJobStatus(namespaceName, jobName).getSucceeded().equals(expectedSucceededPods);
+        JobStatus jobStatus = getJobStatus(namespaceName, jobName);
+        return jobStatus != null && jobStatus.getSucceeded() != null && jobStatus.getSucceeded().equals(expectedSucceededPods);
     }
 
     public boolean checkFailedJobStatus(String namespaceName, String jobName, int expectedFailedPods) {
-        return getJobStatus(namespaceName, jobName).getFailed().equals(expectedFailedPods);
+        JobStatus jobStatus = getJobStatus(namespaceName, jobName);
+        return jobStatus != null && jobStatus.getFailed() != null && jobStatus.getFailed().equals(expectedFailedPods);
     }
 
     // Pods Statuses:  0 Running / 0 Succeeded / 1 Failed
     public JobStatus getJobStatus(String namespaceName, String jobName) {
-        return client.batch().v1().jobs().inNamespace(namespaceName).withName(jobName).get().getStatus();
+        Job job = client.batch().v1().jobs().inNamespace(namespaceName).withName(jobName).get();
+        return job == null ? null : job.getStatus();
     }
 
     public JobStatus getJobStatus(String jobName) {
@@ -517,7 +524,7 @@ public class KubeClient {
     // ============================
 
     public Secret createSecret(Secret secret) {
-        return client.secrets().inNamespace(getNamespace()).resource(secret).createOrReplace();
+        return client.secrets().inNamespace(secret.getMetadata().getNamespace()).resource(secret).createOrReplace();
     }
 
     public void patchSecret(String namespaceName, String secretName, Secret secret) {
@@ -826,5 +833,47 @@ public class KubeClient {
 
     public void deleteValidatingWebhookConfiguration(ValidatingWebhookConfiguration validatingWebhookConfiguration) {
         client.admissionRegistration().v1().validatingWebhookConfigurations().resource(validatingWebhookConfiguration).delete();
+    }
+
+    // =====================================================
+    // ---------------> OPENSHIFT RESOURCES <---------------
+    // =====================================================
+
+    public String getInstallPlanNameUsingCsvPrefix(String namespaceName, String csvPrefix) {
+        return client.adapt(OpenShiftClient.class).operatorHub().installPlans()
+            .inNamespace(namespaceName).list().getItems().stream()
+            .filter(installPlan -> installPlan.getSpec().getClusterServiceVersionNames().toString().contains(csvPrefix)).findFirst().get().getMetadata().getName();
+    }
+
+    public InstallPlan getInstallPlan(String namespaceName, String installPlanName) {
+        return client.adapt(OpenShiftClient.class).operatorHub().installPlans().inNamespace(namespaceName).withName(installPlanName).get();
+    }
+
+    public void approveInstallPlan(String namespaceName, String installPlanName) {
+        InstallPlan installPlan = new InstallPlanBuilder(kubeClient().getInstallPlan(namespaceName, installPlanName))
+            .editSpec()
+                .withApproved()
+            .endSpec()
+            .build();
+
+        client.adapt(OpenShiftClient.class).operatorHub().installPlans().inNamespace(namespaceName).withName(installPlanName).patch(installPlan);
+    }
+
+    public InstallPlan getNonApprovedInstallPlan(String namespaceName) {
+        return client.adapt(OpenShiftClient.class).operatorHub().installPlans()
+            .inNamespace(namespaceName).list().getItems().stream().filter(installPlan -> !installPlan.getSpec().getApproved()).findFirst().get();
+    }
+
+    public ClusterServiceVersion getCsv(String namespaceName, String csvName) {
+        return client.adapt(OpenShiftClient.class).operatorHub().clusterServiceVersions().inNamespace(namespaceName).withName(csvName).get();
+    }
+
+    public ClusterServiceVersion getCsvWithPrefix(String namespaceName, String csvPrefix) {
+        return client.adapt(OpenShiftClient.class).operatorHub().clusterServiceVersions().inNamespace(namespaceName)
+            .list().getItems().stream().filter(csv -> csv.getMetadata().getName().contains(csvPrefix)).findFirst().get();
+    }
+
+    public void deleteCsv(String namespaceName, String csvName) {
+        client.adapt(OpenShiftClient.class).operatorHub().clusterServiceVersions().inNamespace(namespaceName).withName(csvName).delete();
     }
 }

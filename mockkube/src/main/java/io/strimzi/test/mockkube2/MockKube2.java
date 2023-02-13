@@ -19,6 +19,7 @@ import io.strimzi.api.kafka.model.KafkaConnector;
 import io.strimzi.api.kafka.model.KafkaMirrorMaker2;
 import io.strimzi.api.kafka.model.KafkaRebalance;
 import io.strimzi.api.kafka.model.KafkaTopic;
+import io.strimzi.api.kafka.model.KafkaUser;
 import io.strimzi.api.kafka.model.StrimziPodSet;
 import io.strimzi.test.TestUtils;
 import io.strimzi.test.mockkube2.controllers.AbstractMockController;
@@ -43,6 +44,11 @@ public class MockKube2 {
     private final KubernetesClient client;
     private final List<AbstractMockController> controllers = new ArrayList<>();
 
+    /**
+     * Constructs the Kubernetes Mock Kube Server
+     *
+     * @param client    Kubernetes client backed by the Fabric8 Kubernetes Mock Server
+     */
     public MockKube2(KubernetesClient client) {
         this.client = client;
     }
@@ -69,13 +75,13 @@ public class MockKube2 {
     private void registerCrd(String apiVersion, String kind, Class<? extends KubernetesResource> crdClass, String crdPath)  {
         KubernetesDeserializer.registerCustomKind(apiVersion, kind, crdClass);
 
-        CustomResourceDefinition kafkaCrd = client
+        CustomResourceDefinition crd = client
                 .apiextensions().v1()
                 .customResourceDefinitions()
                 .load(crdPath)
                 .get();
 
-        client.apiextensions().v1().customResourceDefinitions().resource(kafkaCrd).create();
+        client.apiextensions().v1().customResourceDefinitions().resource(crd).create();
     }
 
     /**
@@ -104,6 +110,11 @@ public class MockKube2 {
         private final KubernetesClient client;
         private final MockKube2 mock;
 
+        /**
+         * Constructs the Kubernetes Mock Kube Builder
+         *
+         * @param client    Kubernetes client backed by the Fabric8 Kubernetes Mock Server
+         */
         public MockKube2Builder(KubernetesClient client) {
             this.client = client;
             this.mock = new MockKube2(client);
@@ -166,6 +177,16 @@ public class MockKube2 {
          */
         public MockKube2Builder withKafkaTopicCrd()  {
             mock.registerCrd("kafka.strimzi.io/v1beta2", "KafkaTopic", KafkaTopic.class, TestUtils.CRD_TOPIC);
+            return this;
+        }
+
+        /**
+         * Registers the KafkaUser CRD
+         *
+         * @return  MockKube builder instance
+         */
+        public MockKube2Builder withKafkaUserCrd()  {
+            mock.registerCrd("kafka.strimzi.io/v1beta2", "KafkaUser", KafkaUser.class, TestUtils.CRD_KAFKA_USER);
             return this;
         }
 
@@ -254,7 +275,6 @@ public class MockKube2 {
             initializeResources(Crds.kafkaMirrorMaker2Operation(client), resources);
             return this;
         }
-
 
         /**
          * Set the mock web server's logging level as needed, defaults to INFO

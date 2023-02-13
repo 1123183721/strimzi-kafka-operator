@@ -6,6 +6,7 @@ package io.strimzi.systemtest.utils.kafkaUtils;
 
 import io.strimzi.api.kafka.model.KafkaConnectResources;
 import io.strimzi.api.kafka.model.KafkaConnector;
+import io.strimzi.api.kafka.model.status.KafkaConnectorStatus;
 import io.strimzi.systemtest.Constants;
 import io.strimzi.systemtest.resources.ResourceManager;
 import io.strimzi.systemtest.resources.ResourceOperation;
@@ -15,11 +16,14 @@ import io.vertx.core.json.JsonObject;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import java.util.ArrayList;
+import java.util.Map;
+import java.util.stream.Collectors;
+
 import static io.strimzi.systemtest.Constants.GLOBAL_RECONCILIATION_COUNT;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.NotReady;
 import static io.strimzi.systemtest.enums.CustomResourceStatus.Ready;
 import static io.strimzi.test.k8s.KubeClusterResource.cmdKubeClient;
-import static io.strimzi.test.k8s.KubeClusterResource.kubeClient;
 
 public class KafkaConnectorUtils {
 
@@ -53,10 +57,6 @@ public class KafkaConnectorUtils {
         );
     }
 
-    public static void waitForConnectorStability(String connectorName, String connectPodName) {
-        waitForConnectorStability(kubeClient().getNamespace(), connectorName, connectPodName);
-    }
-
     /**
      * Wait until KafkaConnector is in desired state
      * @param namespaceName Namespace name
@@ -72,16 +72,8 @@ public class KafkaConnectorUtils {
         return waitForConnectorStatus(namespaceName, connectorName, Ready);
     }
 
-    public static boolean waitForConnectorReady(String connectorName) {
-        return waitForConnectorReady(kubeClient().getNamespace(), connectorName);
-    }
-
     public static boolean waitForConnectorNotReady(String namespaceName, String connectorName) {
         return waitForConnectorStatus(namespaceName, connectorName, NotReady);
-    }
-
-    public static boolean waitForConnectorNotReady(String connectorName) {
-        return waitForConnectorNotReady(kubeClient().getNamespace(), connectorName);
     }
 
     public static String getCreatedConnectors(String namespaceName, String connectPodName) {
@@ -90,16 +82,16 @@ public class KafkaConnectorUtils {
         ).out();
     }
 
-    public static void waitForConnectorDeletion(String connectorName) {
+    public static void waitForConnectorDeletion(String namespaceName, String connectorName) {
         TestUtils.waitFor(connectorName + " connector deletion", Constants.GLOBAL_POLL_INTERVAL, READINESS_TIMEOUT, () -> {
-            if (KafkaConnectorResource.kafkaConnectorClient().inNamespace(kubeClient().getNamespace()).withName(connectorName).get() == null) {
+            if (KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get() == null) {
                 return true;
             } else {
                 LOGGER.info("KafkaConnector: {} is not deleted yet, triggering force delete", connectorName);
                 cmdKubeClient().deleteByName(KafkaConnector.RESOURCE_KIND, connectorName);
                 return false;
             }
-        }, () -> ResourceManager.logCurrentResourceStatus(KafkaConnectorResource.kafkaConnectorClient().inNamespace(kubeClient().getNamespace()).withName(connectorName).get()));
+        }, () -> ResourceManager.logCurrentResourceStatus(KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get()));
     }
 
     public static void createFileSinkConnector(String namespaceName, String podName, String topicName, String sinkFileName, String apiUrl) {
@@ -111,10 +103,6 @@ public class KafkaConnectorUtils {
         );
     }
 
-    public static void createFileSinkConnector(String podName, String topicName, String sinkFileName, String apiUrl) {
-        createFileSinkConnector(kubeClient().getNamespace(), podName, topicName, sinkFileName, apiUrl);
-    }
-
     public static void waitForConnectorsTaskMaxChange(String namespaceName, String connectorName, int taskMax) {
         TestUtils.waitFor("Wait for KafkaConnector taskMax will change", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS, Constants.GLOBAL_TIMEOUT,
             () -> (KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName)
@@ -122,6 +110,41 @@ public class KafkaConnectorUtils {
                 && (KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName)
                 .withName(connectorName).get().getStatus().getTasksMax() == taskMax)
         );
+    }
+
+    public static void waitForConnectorTaskState(String namespaceName, String connectorName, int taskId, String state) {
+        LOGGER.info("Waiting for task with id:{} to be in state {}", taskId, state);
+        TestUtils.waitFor(String.format("Wait for KafkaConnector task status to be: %s", state), Constants.GLOBAL_POLL_INTERVAL_MEDIUM, Constants.GLOBAL_TIMEOUT,
+            () -> (getConnectorTaskState(namespaceName, connectorName, taskId).equals(state))
+        );
+    }
+
+    public static String getConnectorTaskState(String namespaceName, String connectorName, int taskId) {
+        KafkaConnectorStatus connectorState = KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get().getStatus();
+        Map<String, Object> connectorTask = ((ArrayList<Map<String, Object>>) connectorState.getConnectorStatus().get("tasks")).stream().filter(conn -> conn.get("id").equals(taskId)).collect(Collectors.toList()).get(0);
+        return  (String) connectorTask.get("state");
+    }
+
+    public static void waitForConnectorAutoRestartCount(String namespaceName, String connectorName, int restartCount) {
+        LOGGER.info("Waiting for kafkaConnector {} to have autoRestartCount {}", connectorName, restartCount);
+        TestUtils.waitFor(String.format("Wait for kafkaConnector %s to have autoRestartCount: %s", connectorName, restartCount), Constants.GLOBAL_POLL_INTERVAL_MEDIUM, Constants.GLOBAL_TIMEOUT,
+            () -> (getConnectorAutoRestartCount(namespaceName, connectorName) == restartCount)
+        );
+    }
+
+    public static int getConnectorAutoRestartCount(String namespaceName, String connectorName) {
+        KafkaConnectorStatus connectorState = KafkaConnectorResource.kafkaConnectorClient().inNamespace(namespaceName).withName(connectorName).get().getStatus();
+        // If autoRestartCount is 0 it's not present in the resource status and returns null when looked for
+        if (connectorState.getAutoRestart() != null) {
+            return connectorState.getAutoRestart().getCount();
+        }
+        return 0;
+    }
+
+    public static void waitForConnectorsTaskMaxChangeViaAPI(String namespaceName, String connectPodName, String connectorName, int taskMax) {
+        TestUtils.waitFor("Wait for KafkaConnector taskMax will change via API", Constants.POLL_INTERVAL_FOR_RESOURCE_READINESS,
+            ResourceOperation.getTimeoutForResourceReadiness(KafkaConnector.RESOURCE_KIND),
+            () -> getConnectorSpecFromConnectAPI(namespaceName, connectPodName, connectorName).contains("\"tasks.max\":\"" + taskMax + "\""));
     }
 
     public static String getConnectorSpecFromConnectAPI(String namespaceName, String podName, String connectorName) {
